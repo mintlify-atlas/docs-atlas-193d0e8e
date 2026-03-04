@@ -1,0 +1,354 @@
+---
+title: 'check-upstream-status'
+description: 'Finds the most recent digest page for an agent and returns structured status with staleness detection'
+---
+
+## Overview
+
+The `check-upstream-status` worker finds the most recent digest page for a given agent, reads its machine-readable status line and run timestamp, and returns a structured status object. It's used by dependent agents (like Client Health Scorecard) to check upstream data freshness and completeness.
+
+**Key features:**
+- Searches for most recent digest matching agent patterns
+- Parses machine-readable status lines from page content
+- Detects stale data based on configurable age thresholds
+- Identifies degraded states (partial, failed, ERROR-titled, stale)
+- Returns pre-formatted data completeness notices
+
+## Input Parameters
+
+<ParamField path="agent_name" type="string" required>
+  Name of the agent to check. Must be one of the valid agent names:
+  - `"Inbox Manager"`
+  - `"Personal Ops Manager"`
+  - `"GitHub Insyncerator"`
+  - `"Client Repo Auditor"`
+  - `"Docs Librarian"`
+  - `"VEP Weekly Reporter"`
+  - `"Home & Life Watcher"`
+  - `"Template Freshness Watcher"`
+  - `"Time Log Auditor"`
+  - `"Client Health Scorecard"`
+  - `"Morning Briefing"`
+</ParamField>
+
+<ParamField path="max_age_hours" type="number">
+  Maximum age in hours before digest is considered stale. Default: `48`
+</ParamField>
+
+<ParamField path="require_current_cycle" type="boolean">
+  If true, enforces MAX_AGE_DEFAULT (48h) regardless of max_age_hours. Default: `false`
+</ParamField>
+
+## Output Format
+
+All outputs include these fields:
+
+<ResponseField name="found" type="boolean" required>
+  Whether a digest page was found for the agent
+</ResponseField>
+
+<ResponseField name="agent_name" type="string" required>
+  Echo of input agent_name
+</ResponseField>
+
+<ResponseField name="status" type="UpstreamStatus" required>
+  Overall status. One of:
+  - `"complete"` — ✅ Complete run, fresh data
+  - `"partial"` — ⚠️ Partial run
+  - `"failed"` — ❌ Failed run
+  - `"full_report"` — 📊 Full Report
+  - `"stub"` — 📝 Stub
+  - `"not_found"` — No digest found
+  - `"stale"` — Found but older than max_age_hours
+  - `"unknown"` — Could not parse status
+</ResponseField>
+
+<ResponseField name="status_type" type="'sync' | 'snapshot' | 'report' | 'heartbeat' | null" required>
+  Type of run from status line, or null if not found/parsed
+</ResponseField>
+
+<ResponseField name="run_time" type="string | null" required>
+  ISO 8601 timestamp of run from digest content, or null if not found
+</ResponseField>
+
+<ResponseField name="run_time_age_hours" type="number | null" required>
+  Hours since run_time, or null if run_time not found
+</ResponseField>
+
+<ResponseField name="is_stale" type="boolean" required>
+  Whether digest is older than max_age_hours or requires current cycle
+</ResponseField>
+
+<ResponseField name="is_heartbeat" type="boolean" required>
+  Whether digest content contains "Heartbeat: no actionable items"
+</ResponseField>
+
+<ResponseField name="is_error_titled" type="boolean" required>
+  Whether page title includes "ERROR"
+</ResponseField>
+
+<ResponseField name="page_url" type="string | null" required>
+  Notion URL of found digest, or null
+</ResponseField>
+
+<ResponseField name="page_id" type="string | null" required>
+  Notion page ID of found digest, or null
+</ResponseField>
+
+<ResponseField name="degraded" type="boolean" required>
+  Whether upstream data is degraded. True if:
+  - status is "not_found", "stale", "partial", or "failed"
+  - OR is_error_titled is true
+</ResponseField>
+
+<ResponseField name="data_completeness_notice" type="string" required>
+  Pre-formatted notice for inclusion in dependent digest. Empty string if not degraded.
+  
+  Examples:
+  - `"⚠️ Data Completeness Notice: Time Log Auditor digest not found for current cycle. Dimensions relying on this data marked 🔘 Unavailable."`
+  - `"⚠️ Data Completeness Notice: Docs Librarian last ran 52h ago (expected within 48h). Treating as stale."`
+  - `"⚠️ Data Completeness Notice: VEP Weekly Reporter last run was ⚠️ Partial / ❌ Failed. Upstream data may be incomplete."`
+  - `"⚠️ Data Completeness Notice: GitHub Insyncerator last digest was an ERROR run. Treating upstream data as degraded."`
+</ResponseField>
+
+## Usage Examples
+
+<Tabs>
+  <Tab title="Check Multiple Upstreams">
+    ```typescript
+    const upstreamAgents = [
+      "Time Log Auditor",
+      "Docs Librarian",
+      "VEP Weekly Reporter",
+    ];
+
+    const checks = upstreamAgents.map(agent_name => ({
+      agent_name,
+      max_age_hours: 48,
+      require_current_cycle: true,
+    }));
+
+    for (const input of checks) {
+      const result = await worker.execute(input);
+      
+      if (result.degraded) {
+        console.log(result.data_completeness_notice);
+        // Include notice in dependent digest
+      }
+      
+      // Use result.status, result.run_time, result.page_url
+      // in Client Health Scorecard digest
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Healthy Upstream">
+    ```typescript
+    const input = {
+      agent_name: "Time Log Auditor",
+      max_age_hours: 48,
+      require_current_cycle: true,
+    };
+
+    const result = await worker.execute(input);
+    // {
+    //   found: true,
+    //   agent_name: "Time Log Auditor",
+    //   status: "complete",
+    //   status_type: "sync",
+    //   run_time: "2026-02-28T08:00:00.000Z",
+    //   run_time_age_hours: 2,
+    //   is_stale: false,
+    //   is_heartbeat: false,
+    //   is_error_titled: false,
+    //   page_url: "https://www.notion.so/time-log-audit-2026-02-28-abc",
+    //   page_id: "abc123...",
+    //   degraded: false,
+    //   data_completeness_notice: ""
+    // }
+    ```
+  </Tab>
+  
+  <Tab title="Stale Upstream">
+    ```typescript
+    const input = {
+      agent_name: "Docs Librarian",
+      max_age_hours: 48,
+      require_current_cycle: false,
+    };
+
+    const result = await worker.execute(input);
+    // {
+    //   found: true,
+    //   agent_name: "Docs Librarian",
+    //   status: "stale",
+    //   status_type: "snapshot",
+    //   run_time: "2026-02-25T10:00:00.000Z",
+    //   run_time_age_hours: 72,
+    //   is_stale: true,
+    //   is_heartbeat: false,
+    //   is_error_titled: false,
+    //   page_url: "https://www.notion.so/docs-quick-scan-2026-02-25-xyz",
+    //   page_id: "xyz789...",
+    //   degraded: true,
+    //   data_completeness_notice: "⚠️ Data Completeness Notice: Docs Librarian last ran 72h ago (expected within 48h). Treating as stale."
+    // }
+    ```
+  </Tab>
+  
+  <Tab title="Not Found">
+    ```typescript
+    const input = {
+      agent_name: "VEP Weekly Reporter",
+      max_age_hours: 48,
+      require_current_cycle: true,
+    };
+
+    const result = await worker.execute(input);
+    // {
+    //   found: false,
+    //   agent_name: "VEP Weekly Reporter",
+    //   status: "not_found",
+    //   status_type: null,
+    //   run_time: null,
+    //   run_time_age_hours: null,
+    //   is_stale: true,
+    //   is_heartbeat: false,
+    //   is_error_titled: false,
+    //   page_url: null,
+    //   page_id: null,
+    //   degraded: true,
+    //   data_completeness_notice: "⚠️ Data Completeness Notice: VEP Weekly Reporter digest not found for current cycle. Dimensions relying on this data marked 🔘 Unavailable."
+    // }
+    ```
+  </Tab>
+</Tabs>
+
+## Agent Digest Patterns
+
+The worker searches for digests matching agent-specific title patterns:
+
+| Agent | Digest Title Patterns |
+|-------|----------------------|
+| Inbox Manager | "Email Triage" |
+| Personal Ops Manager | "Personal Triage" |
+| GitHub Insyncerator | "GitHub Sync" |
+| Client Repo Auditor | "Client Repo Audit" |
+| Docs Librarian | "Docs Quick Scan", "Docs Cleanup Report" |
+| VEP Weekly Reporter | "VEP Weekly Activity Report" |
+| Home & Life Watcher | "Home & Life Weekly Digest" |
+| Template Freshness Watcher | "Setup Template Freshness Report" |
+| Time Log Auditor | "Time Log Audit" |
+| Client Health Scorecard | "Client Health Scorecard" |
+| Morning Briefing | "Morning Briefing" |
+
+<Note>
+  Patterns are defined in `src/shared/agent-config.ts:6-18`. The worker queries the target database (docs or home_docs) with OR filters for all patterns.
+</Note>
+
+## Status Line Parsing
+
+The worker reads the first paragraph block from the digest page and parses the machine-readable status line:
+
+```
+✅ sync:complete
+⚠️ sync:partial
+❌ sync:failed
+```
+
+Format: `[emoji] [status_type]:[status_value]`
+
+If parsing fails, `status_type` is `null` and `status` is `"unknown"`.
+
+## Staleness Detection
+
+<Warning>
+  Staleness is calculated from page `created_time`, NOT from parsed run_time. This ensures staleness detection even if run_time parsing fails.
+</Warning>
+
+A digest is marked stale if:
+1. `require_current_cycle: true` AND `run_time_age_hours > 48`, OR
+2. `page_created_age_hours > max_age_hours`
+
+When marked stale, `status` changes from parsed value to `"stale"`.
+
+## Data Completeness Notices
+
+The worker generates notices for four degraded states:
+
+<CodeGroup>
+```text Not Found
+⚠️ Data Completeness Notice: [agent_name] digest not found for current cycle. 
+Dimensions relying on this data marked 🔘 Unavailable.
+```
+
+```text Stale
+⚠️ Data Completeness Notice: [agent_name] last ran [age]h ago 
+(expected within [max_age]h). Treating as stale.
+```
+
+```text Partial/Failed
+⚠️ Data Completeness Notice: [agent_name] last run was ⚠️ Partial / ❌ Failed. 
+Upstream data may be incomplete.
+```
+
+```text ERROR-Titled
+⚠️ Data Completeness Notice: [agent_name] last digest was an ERROR run. 
+Treating upstream data as degraded.
+```
+</CodeGroup>
+
+## Error Handling
+
+The worker returns structured output even on Notion API errors:
+
+```typescript
+{
+  found: false,
+  agent_name: input.agent_name,
+  status: "unknown",
+  status_type: null,
+  run_time: null,
+  run_time_age_hours: null,
+  is_stale: true,
+  is_heartbeat: false,
+  is_error_titled: false,
+  page_url: null,
+  page_id: null,
+  degraded: true,
+  data_completeness_notice: `⚠️ Data Completeness Notice: Error reading ${agent_name} — ${error_message}`
+}
+```
+
+<Note>
+  The worker NEVER throws. Always returns a structured output with `degraded: true` on errors.
+</Note>
+
+## Implementation Details
+
+### Source Files
+- Worker implementation: `src/workers/check-upstream-status.ts:33-197`
+- Schema definition: `src/index.ts:48-63`
+- Type definitions: `src/shared/types.ts:69-99`
+- Agent patterns: `src/shared/agent-config.ts:6-32`
+
+### Database Targeting
+
+The worker automatically determines target database from agent name:
+- `home_docs`: Personal Ops Manager, Home & Life Watcher
+- `docs`: All other agents
+
+Mapping defined in `AGENT_TARGET_DB` (src/shared/agent-config.ts:20-32).
+
+### Query Strategy
+
+The worker:
+1. Builds OR filter with all agent digest patterns
+2. Sorts by `created_time` descending
+3. Fetches top 5 results
+4. Returns first result (most recent)
+5. Reads first 50 blocks to parse status line and run time
+
+<Note>
+  If an agent has multiple digest patterns (like Docs Librarian with "Docs Quick Scan" and "Docs Cleanup Report"), the worker returns the most recent match across all patterns.
+</Note>

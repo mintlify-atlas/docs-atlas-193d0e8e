@@ -1,0 +1,474 @@
+---
+title: "Agent System"
+description: "The 11-agent system, digest patterns, and target database routing"
+---
+
+## Overview
+
+The jre-notion-workers system supports an 11-agent architecture where each agent produces digests (reports) that are written to Notion databases. The system provides strict validation, standardized naming patterns, and automated routing.
+
+## The 11 Agents
+
+Each agent has a specific role and produces one or more digest types:
+
+<CardGroup cols={2}>
+  <Card title="Inbox Manager" icon="envelope">
+    **Digest**: Email Triage  
+    **Target**: Docs database  
+    **Purpose**: Processes and triages incoming emails
+  </Card>
+
+  <Card title="Personal Ops Manager" icon="user">
+    **Digest**: Personal Triage  
+    **Target**: Home Docs database  
+    **Purpose**: Manages personal tasks and operations
+  </Card>
+
+  <Card title="GitHub Insyncerator" icon="github">
+    **Digest**: GitHub Sync  
+    **Target**: Docs database  
+    **Purpose**: Synchronizes GitHub activity and issues
+  </Card>
+
+  <Card title="Client Repo Auditor" icon="folder-tree">
+    **Digest**: Client Repo Audit  
+    **Target**: Docs database  
+    **Purpose**: Audits client repositories for issues
+  </Card>
+
+  <Card title="Docs Librarian" icon="books">
+    **Digests**:  
+    - Docs Quick Scan  
+    - Docs Cleanup Report  
+    **Target**: Docs database  
+    **Purpose**: Maintains documentation quality
+  </Card>
+
+  <Card title="VEP Weekly Reporter" icon="chart-line">
+    **Digest**: VEP Weekly Activity Report  
+    **Target**: Docs database  
+    **Purpose**: Generates weekly VEP activity summaries
+  </Card>
+
+  <Card title="Home & Life Watcher" icon="house">
+    **Digest**: Home & Life Weekly Digest  
+    **Target**: Home Docs database  
+    **Purpose**: Tracks personal and life events
+  </Card>
+
+  <Card title="Template Freshness Watcher" icon="clock">
+    **Digest**: Setup Template Freshness Report  
+    **Target**: Docs database  
+    **Purpose**: Monitors template staleness
+  </Card>
+
+  <Card title="Time Log Auditor" icon="stopwatch">
+    **Digest**: Time Log Audit  
+    **Target**: Docs database  
+    **Purpose**: Audits time tracking entries
+  </Card>
+
+  <Card title="Client Health Scorecard" icon="heart-pulse">
+    **Digest**: Client Health Scorecard  
+    **Target**: Docs database  
+    **Purpose**: Monitors client account health
+  </Card>
+
+  <Card title="Morning Briefing" icon="sun">
+    **Digest**: Morning Briefing  
+    **Target**: Docs database  
+    **Purpose**: Daily summary and priorities
+  </Card>
+</CardGroup>
+
+## Agent Configuration
+
+The system maintains agent configuration in `src/shared/agent-config.ts`:
+
+<CodeGroup>
+
+```typescript agent-config.ts
+export const AGENT_DIGEST_PATTERNS: Record<string, string[]> = {
+  "Inbox Manager": ["Email Triage"],
+  "Personal Ops Manager": ["Personal Triage"],
+  "GitHub Insyncerator": ["GitHub Sync"],
+  "Client Repo Auditor": ["Client Repo Audit"],
+  "Docs Librarian": ["Docs Quick Scan", "Docs Cleanup Report"],
+  "VEP Weekly Reporter": ["VEP Weekly Activity Report"],
+  "Home & Life Watcher": ["Home & Life Weekly Digest"],
+  "Template Freshness Watcher": ["Setup Template Freshness Report"],
+  "Time Log Auditor": ["Time Log Audit"],
+  "Client Health Scorecard": ["Client Health Scorecard"],
+  "Morning Briefing": ["Morning Briefing"],
+};
+
+export const AGENT_TARGET_DB: Record<string, TargetDatabase> = {
+  "Inbox Manager": "docs",
+  "Personal Ops Manager": "home_docs",
+  "GitHub Insyncerator": "docs",
+  "Client Repo Auditor": "docs",
+  "Docs Librarian": "docs",
+  "VEP Weekly Reporter": "docs",
+  "Home & Life Watcher": "home_docs",
+  "Template Freshness Watcher": "docs",
+  "Time Log Auditor": "docs",
+  "Client Health Scorecard": "docs",
+  "Morning Briefing": "docs",
+};
+
+export const VALID_AGENT_NAMES = Object.keys(AGENT_DIGEST_PATTERNS);
+```
+
+</CodeGroup>
+
+<Note>
+  All agent names are validated against `VALID_AGENT_NAMES`. Invalid agent names are rejected at the validation stage.
+</Note>
+
+## Digest Patterns
+
+Each agent produces one or more standardized digest types. The **first digest pattern** for each agent is used as the default digest type in page titles.
+
+### Multi-Pattern Agents
+
+Some agents produce multiple digest types:
+
+<Accordion title="Docs Librarian">
+  The Docs Librarian produces two types of digests:
+  
+  1. **Docs Quick Scan** - Fast scan of documentation
+  2. **Docs Cleanup Report** - Detailed cleanup recommendations
+  
+  The default digest type (used in page titles) is "Docs Quick Scan" (the first pattern).
+</Accordion>
+
+### Default Digest Type
+
+The system provides a helper function to get the default digest type:
+
+```typescript
+export function getDefaultDigestType(agentName: string): string {
+  const patterns = AGENT_DIGEST_PATTERNS[agentName];
+  if (!patterns || patterns.length === 0) return agentName;
+  const first = patterns[0];
+  return first ?? agentName;
+}
+```
+
+Example usage:
+```typescript
+getDefaultDigestType("Inbox Manager")  // Returns: "Email Triage"
+getDefaultDigestType("Docs Librarian") // Returns: "Docs Quick Scan"
+```
+
+## Target Database Routing
+
+Agents write to one of two Notion databases:
+
+<CardGroup cols={2}>
+  <Card title="Docs Database" icon="briefcase">
+    **Agent Count**: 9 agents  
+    **Environment Variable**: `DOCS_DATABASE_ID`  
+    **Purpose**: Work-related documentation and reports
+    
+    Agents:
+    - Inbox Manager
+    - GitHub Insyncerator
+    - Client Repo Auditor
+    - Docs Librarian
+    - VEP Weekly Reporter
+    - Template Freshness Watcher
+    - Time Log Auditor
+    - Client Health Scorecard
+    - Morning Briefing
+  </Card>
+
+  <Card title="Home Docs Database" icon="house">
+    **Agent Count**: 2 agents  
+    **Environment Variable**: `HOME_DOCS_DATABASE_ID`  
+    **Purpose**: Personal and life management
+    
+    Agents:
+    - Personal Ops Manager
+    - Home & Life Watcher
+  </Card>
+</CardGroup>
+
+### Automatic Routing
+
+The `write-agent-digest` worker automatically routes digests to the correct database:
+
+```typescript
+const dbId = input.target_database === "home_docs" 
+  ? getHomeDocsDatabaseId() 
+  : getDocsDatabaseId();
+```
+
+<Info>
+  The `target_database` field in `WriteAgentDigestInput` must be either `"docs"` or `"home_docs"`. This is enforced by TypeScript types and JSON schema validation.
+</Info>
+
+## Agent Validation
+
+All workers validate agent names before processing:
+
+```typescript
+import { VALID_AGENT_NAMES } from "../shared/agent-config.js";
+
+if (!VALID_AGENT_NAMES.includes(input.agent_name)) {
+  return { 
+    success: false, 
+    error: `Invalid agent_name: ${input.agent_name}` 
+  };
+}
+```
+
+### Validation Helper
+
+The system provides a validation helper:
+
+```typescript
+export function isValidAgentName(name: string): boolean {
+  return VALID_AGENT_NAMES.includes(name);
+}
+```
+
+<Warning>
+  **Strict Validation**: Any agent name not in `VALID_AGENT_NAMES` will be rejected. This prevents typos and ensures consistency.
+</Warning>
+
+## Digest Page Titles
+
+Digest pages follow standardized title formats:
+
+### Normal Runs
+```
+{emoji} {Digest Type} — {date}
+```
+
+Examples:
+- `📧 Email Triage — 2026-03-04`
+- `🐙 GitHub Sync — 2026-03-04`
+- `📊 Client Health Scorecard — 2026-03-04`
+
+### Degraded Runs
+
+When `status_value` is `"partial"` or `"failed"`:
+
+```
+{Digest Type} ERROR — {date}
+```
+
+Examples:
+- `Email Triage ERROR — 2026-03-04`
+- `GitHub Sync ERROR — 2026-03-04`
+
+<Note>
+  Error-titled pages omit the emoji to make them visually distinct and easier to spot in the database.
+</Note>
+
+### Title Construction
+
+The `write-agent-digest` worker constructs titles using this logic:
+
+```typescript
+function buildPageTitle(params: {
+  emoji: string;
+  digestType: string;
+  date: string;
+  isError: boolean;
+}): string {
+  const { emoji, digestType, date, isError } = params;
+  if (isError) return `${digestType} ERROR — ${date}`;
+  return `${emoji} ${digestType} — ${date}`;
+}
+
+const isErrorTitled = 
+  input.status_value === "partial" || input.status_value === "failed";
+```
+
+## Status Types
+
+Agents report one of four status types:
+
+<CodeGroup>
+
+```typescript Types
+export type StatusType = "sync" | "snapshot" | "report" | "heartbeat";
+export type StatusValue = "complete" | "partial" | "failed" | "full_report" | "stub";
+```
+
+</CodeGroup>
+
+<AccordionGroup>
+  <Accordion title="sync - Synchronization Operations">
+    Used for agents that synchronize data between systems.
+    
+    **Status values**:
+    - `complete` → ✅ Complete
+    - `partial` → ⚠️ Partial
+    - `failed` → ❌ Failed
+    
+    **Example**: GitHub Insyncerator syncing issues
+  </Accordion>
+
+  <Accordion title="snapshot - Point-in-time Captures">
+    Used for agents that capture a snapshot of current state.
+    
+    **Status values**:
+    - `complete` → ✅ Complete
+    - `partial` → ⚠️ Partial
+    
+    **Example**: Client Repo Auditor scanning repositories
+  </Accordion>
+
+  <Accordion title="report - Analysis Reports">
+    Used for agents that generate analytical reports.
+    
+    **Status values**:
+    - `full_report` → ✅ Full report
+    - `stub` → ⚠️ Stub
+    - `failed` → ❌ Failed
+    
+    **Example**: VEP Weekly Activity Report
+  </Accordion>
+
+  <Accordion title="heartbeat - No Actionable Items">
+    Special status indicating successful run with no actionable items.
+    
+    Always displays as: `Sync Status: ✅ Complete`
+    
+    **Example**: Email Triage finding no new emails
+  </Accordion>
+</AccordionGroup>
+
+## Heartbeat Detection
+
+The system automatically detects heartbeat runs:
+
+```typescript
+function isHeartbeat(params: {
+  status_type: string;
+  flagged_items: FlaggedItem[];
+  actions_taken: ActionsTaken;
+}): boolean {
+  if (params.status_type === "heartbeat") return true;
+  
+  const { flagged_items, actions_taken } = params;
+  const hasTasks = 
+    (actions_taken.created_tasks?.length ?? 0) > 0 || 
+    (actions_taken.updated_tasks?.length ?? 0) > 0;
+  
+  return flagged_items.length === 0 && !hasTasks;
+}
+```
+
+A run is considered a heartbeat if:
+1. `status_type` is explicitly `"heartbeat"`, OR
+2. No flagged items AND no tasks created or updated
+
+<Info>
+  Heartbeat pages include the line: `Heartbeat: no actionable items` in their content.
+</Info>
+
+## Agent Dependencies
+
+Some agents depend on upstream agents. The `check-upstream-status` worker enables dependency checking:
+
+```typescript
+const upstreamStatus = await notion.checkUpstreamStatus({
+  agent_name: "GitHub Insyncerator",
+  max_age_hours: 24,
+  require_current_cycle: true,
+});
+
+if (!upstreamStatus.found || upstreamStatus.is_stale) {
+  // Handle missing or stale dependency
+}
+```
+
+<Warning>
+  Agents should check their dependencies before running to ensure they have fresh data to work with.
+</Warning>
+
+## Agent Escalations
+
+Agents can escalate issues to other agents using the `create-handoff-marker` worker:
+
+```typescript
+const handoff = await notion.createHandoffMarker({
+  source_agent: "Inbox Manager",
+  target_agent: "GitHub Insyncerator",
+  escalation_reason: "Found GitHub notification requiring sync",
+  source_digest_url: "https://notion.so/...",
+  create_task: true,
+  task_priority: "🔴 High",
+});
+```
+
+See the [Governance](/concepts/governance) page for details on escalation caps and circuit breakers.
+
+## Scope and Boundaries
+
+<CardGroup cols={2}>
+  <Card title="Reads From" icon="book-open">
+    - Docs database
+    - Home Docs database
+  </Card>
+
+  <Card title="Writes To" icon="pen">
+    - Docs database
+    - Home Docs database
+    - Tasks database (for handoffs)
+  </Card>
+</CardGroup>
+
+<Warning>
+  **Governance Rule**: No worker may read or write outside the declared database IDs in environment variables without an explicit governance review.
+</Warning>
+
+## Runtime and Deployment
+
+<AccordionGroup>
+  <Accordion title="Local Development">
+    **Runtime**: Bun ≥ 1.1  
+    **Commands**: `bun run`, `bun test`  
+    **Native TypeScript**: No transpilation step needed
+    
+    ```bash
+    bun run src/index.ts
+    bun test
+    ```
+  </Accordion>
+
+  <Accordion title="Production Deployment">
+    **Runtime**: Node.js ≥ 22  
+    **Deployment**: `ntn workers deploy`  
+    **Platform**: Notion Workers
+    
+    ```bash
+    ntn workers deploy
+    ```
+  </Accordion>
+</AccordionGroup>
+
+<Warning>
+  **Never use Bun-specific APIs** (`Bun.file()`, `Bun.serve()`, etc.) in source files - they won't exist in the Node.js production runtime.
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Governance" icon="shield-check" href="/concepts/governance">
+    Learn about the rules that protect the system
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/concepts/architecture">
+    Understand the system design and data flow
+  </Card>
+  <Card title="Write Agent Digest" icon="pen" href="/workers/write-agent-digest">
+    API reference for creating digest pages
+  </Card>
+  <Card title="Check Upstream Status" icon="magnifying-glass" href="/workers/check-upstream-status">
+    API reference for checking agent dependencies
+  </Card>
+</CardGroup>

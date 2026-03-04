@@ -1,0 +1,322 @@
+---
+title: 'write-agent-digest'
+description: 'Creates governance-compliant agent digest or report pages in Notion with automatic formatting and status tracking'
+---
+
+## Overview
+
+The `write-agent-digest` worker creates a governance-compliant agent digest or report page in the Docs or Home Docs database. It handles all formatting, status line formatting, section ordering, and ERROR-title naming automatically.
+
+**Key features:**
+- Automatic status line generation from machine-readable format
+- Heartbeat detection for zero-activity runs
+- ERROR-titled pages for partial/failed runs
+- Structured sections: Flagged Items, Actions Taken, Routing Summary, Needs Review, Escalations
+- Relation support for Client and Project properties
+
+## Input Parameters
+
+<ParamField path="agent_name" type="string" required>
+  Name of the agent creating the digest. Must be one of the valid agent names:
+  - `"Inbox Manager"`
+  - `"Personal Ops Manager"`
+  - `"GitHub Insyncerator"`
+  - `"Client Repo Auditor"`
+  - `"Docs Librarian"`
+  - `"VEP Weekly Reporter"`
+  - `"Home & Life Watcher"`
+  - `"Template Freshness Watcher"`
+  - `"Time Log Auditor"`
+  - `"Client Health Scorecard"`
+  - `"Morning Briefing"`
+</ParamField>
+
+<ParamField path="agent_emoji" type="string" required>
+  Emoji used in page title (unless ERROR-titled). Example: `"🔄"`
+</ParamField>
+
+<ParamField path="status_type" type="'sync' | 'snapshot' | 'report' | 'heartbeat'" required>
+  Type of agent run:
+  - `sync` — Synchronization run
+  - `snapshot` — Point-in-time snapshot
+  - `report` — Generated report
+  - `heartbeat` — Zero-activity check-in
+</ParamField>
+
+<ParamField path="status_value" type="'complete' | 'partial' | 'failed' | 'full_report' | 'stub'" required>
+  Run outcome:
+  - `complete` — ✅ Complete
+  - `partial` — ⚠️ Partial (ERROR-titled)
+  - `failed` — ❌ Failed (ERROR-titled)
+  - `full_report` — 📊 Full Report
+  - `stub` — 📝 Stub
+</ParamField>
+
+<ParamField path="run_time_chicago" type="string" required>
+  ISO 8601 timestamp in Chicago timezone. Example: `"2026-02-28T09:00:00-06:00"`
+</ParamField>
+
+<ParamField path="scope" type="string" required>
+  Description of data/entities processed. Example: `"All open PRs and recent commits in tracked repos"`
+</ParamField>
+
+<ParamField path="input_versions" type="string" required>
+  Upstream digest versions or "None" if not applicable. Example: `"Time Log Auditor v2026-02-28"`
+</ParamField>
+
+<ParamField path="flagged_items" type="array" required>
+  Items requiring attention. Each item must include:
+  - `description` (string, required): Description of the flagged item
+  - `task_link` (string, optional): Notion URL of created/linked task
+  - `no_task_reason` (string, optional): Reason no task was created
+  
+  **Validation:** Each item must have either `task_link` or `no_task_reason`.
+</ParamField>
+
+<ParamField path="actions_taken" type="object" required>
+  Tasks created or updated during the run:
+  - `created_tasks` (array): List of `{ name: string, notion_url: string }`
+  - `updated_tasks` (array): List of `{ name: string, notion_url: string }`
+</ParamField>
+
+<ParamField path="summary" type="string" required>
+  High-level summary of routing decisions and linking actions. Example: `"Synced 3 repos. 2 items flagged, 1 escalation to Client Repo Auditor."`
+</ParamField>
+
+<ParamField path="needs_review" type="array" required>
+  Items needing manual classification. Each item contains:
+  - `description` (string, required): Description of unclassified item
+</ParamField>
+
+<ParamField path="escalations" type="array" required>
+  Handoffs to other agents. Each escalation includes:
+  - `escalated_to` (string, required): Target agent name
+  - `escalation_reason` (string, required): Reason for escalation
+  - `escalation_owner` (string, required): Owner of escalation (usually target agent)
+  - `handoff_complete` (boolean, required): Whether handoff is complete
+</ParamField>
+
+<ParamField path="target_database" type="'docs' | 'home_docs'" required>
+  Target Notion database:
+  - `docs` — Docs database (most agents)
+  - `home_docs` — Home Docs database (Personal Ops Manager, Home & Life Watcher)
+</ParamField>
+
+<ParamField path="doc_type" type="string" required>
+  Value for Doc Type select property. Example: `"Agent Digest"`
+</ParamField>
+
+<ParamField path="client_relation_ids" type="array">
+  Array of Notion page IDs to link in Client relation property
+</ParamField>
+
+<ParamField path="project_relation_ids" type="array">
+  Array of Notion page IDs to link in Project relation property
+</ParamField>
+
+## Output Format
+
+<ResponseField name="success" type="boolean" required>
+  Whether the digest was created successfully
+</ResponseField>
+
+### On Success (`success: true`)
+
+<ResponseField name="page_url" type="string">
+  Full Notion URL of the created page
+</ResponseField>
+
+<ResponseField name="page_id" type="string">
+  Notion page ID (32-char hex)
+</ResponseField>
+
+<ResponseField name="title" type="string">
+  Generated page title. Format:
+  - Normal: `"🔄 GitHub Sync — 2026-02-28"`
+  - ERROR: `"GitHub Sync ERROR — 2026-02-28"`
+</ResponseField>
+
+<ResponseField name="is_error_titled" type="boolean">
+  Whether page title includes "ERROR" (true for partial/failed status_value)
+</ResponseField>
+
+<ResponseField name="is_heartbeat" type="boolean">
+  Whether run was detected as heartbeat (zero flagged items and zero actions taken)
+</ResponseField>
+
+### On Failure (`success: false`)
+
+<ResponseField name="error" type="string">
+  Error message describing validation or API failure
+</ResponseField>
+
+## Usage Examples
+
+<Tabs>
+  <Tab title="Complete Sync">
+    ```typescript
+    const input = {
+      agent_name: "GitHub Insyncerator",
+      agent_emoji: "🔄",
+      status_type: "sync",
+      status_value: "complete",
+      run_time_chicago: "2026-02-28T09:00:00-06:00",
+      scope: "All open PRs and recent commits in tracked repos",
+      input_versions: "None",
+      flagged_items: [
+        { 
+          description: "PR #42 needs review", 
+          task_link: "https://www.notion.so/task-abc123" 
+        },
+        { 
+          description: "Spike in failed CI on main", 
+          task_link: "https://www.notion.so/task-def456" 
+        },
+      ],
+      actions_taken: {
+        created_tasks: [
+          { name: "Review PR #42", notion_url: "https://www.notion.so/task-abc123" }
+        ],
+        updated_tasks: [
+          { name: "Investigate CI failures", notion_url: "https://www.notion.so/task-def456" }
+        ],
+      },
+      summary: "Synced 3 repos. 2 items flagged, 1 escalation to Client Repo Auditor.",
+      needs_review: [],
+      escalations: [
+        {
+          escalated_to: "Client Repo Auditor",
+          escalation_reason: "Spike in CI failures may need client repo audit",
+          escalation_owner: "Client Repo Auditor",
+          handoff_complete: false,
+        },
+      ],
+      target_database: "docs",
+      doc_type: "Agent Digest",
+    };
+
+    const result = await worker.execute(input);
+    // {
+    //   success: true,
+    //   page_url: "https://www.notion.so/github-sync-2026-02-28-abc",
+    //   page_id: "abc123...",
+    //   title: "🔄 GitHub Sync — 2026-02-28",
+    //   is_error_titled: false,
+    //   is_heartbeat: false
+    // }
+    ```
+  </Tab>
+  
+  <Tab title="Heartbeat Run">
+    ```typescript
+    const input = {
+      agent_name: "Inbox Manager",
+      agent_emoji: "📧",
+      status_type: "heartbeat",
+      status_value: "complete",
+      run_time_chicago: "2026-02-28T07:00:00-06:00",
+      scope: "Inbox and linked task database",
+      input_versions: "None",
+      flagged_items: [],
+      actions_taken: {
+        created_tasks: [],
+        updated_tasks: [],
+      },
+      summary: "No actionable items.",
+      needs_review: [],
+      escalations: [],
+      target_database: "docs",
+      doc_type: "Agent Digest",
+    };
+
+    const result = await worker.execute(input);
+    // {
+    //   success: true,
+    //   page_url: "https://www.notion.so/email-triage-2026-02-28-xyz",
+    //   page_id: "xyz789...",
+    //   title: "📧 Email Triage — 2026-02-28",
+    //   is_error_titled: false,
+    //   is_heartbeat: true
+    // }
+    ```
+  </Tab>
+</Tabs>
+
+## Page Structure
+
+The worker generates pages with the following structure:
+
+```
+[Machine-readable status line]
+✅ Complete / ⚠️ Partial / ❌ Failed
+
+[Heartbeat line if applicable]
+Heartbeat: no actionable items
+
+Run Time: 2026-02-28 09:00 CST
+Scope: [scope text]
+Input versions: [versions or None]
+
+## Flagged Items
+- [description] [task_link or (no_task_reason)]
+- ...
+
+## Actions Taken
+Created Tasks: [task links]
+Updated Tasks: [task links]
+
+## Routing / Linking Summary
+[summary text]
+
+## Unclassified / Needs Review
+- [description]
+- ...
+
+## Escalations / Hand-offs
+Escalated To: [target_agent]
+Escalation Reason: [reason]
+Escalation Owner: [owner]
+Handoff Complete: Yes/No
+```
+
+## Error Handling
+
+<Warning>
+  The worker returns structured errors rather than throwing. Always check `success` field.
+</Warning>
+
+**Validation errors:**
+- Invalid agent name: `{ success: false, error: "Invalid agent_name: ..." }`
+- Missing required fields: `{ success: false, error: "Missing required fields: ..." }`
+- Flagged item missing task_link/no_task_reason: `{ success: false, error: "FlaggedItem must have task_link or no_task_reason: ..." }`
+
+**API errors:**
+- Notion API failures return: `{ success: false, error: "[Notion API error message]" }`
+
+## Implementation Details
+
+### Source Files
+- Worker implementation: `src/workers/write-agent-digest.ts:120-188`
+- Schema definition: `src/index.ts:12-46`
+- Type definitions: `src/shared/types.ts:37-66`
+
+### Heartbeat Detection
+
+A run is detected as heartbeat if:
+1. `status_type === "heartbeat"`, OR
+2. `flagged_items.length === 0` AND `created_tasks.length === 0` AND `updated_tasks.length === 0`
+
+Heartbeat pages include the line: `"Heartbeat: no actionable items"`
+
+### ERROR Titling
+
+Pages are ERROR-titled when:
+- `status_value === "partial"` OR `status_value === "failed"`
+
+ERROR-titled format: `"[Digest Type] ERROR — [Date]"` (no emoji)
+
+Normal format: `"[Emoji] [Digest Type] — [Date]"`
+
+<Note>
+  The worker automatically determines the digest type from agent name using `AGENT_DIGEST_PATTERNS` mapping. For example, "GitHub Insyncerator" → "GitHub Sync".
+</Note>

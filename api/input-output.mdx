@@ -1,0 +1,472 @@
+---
+title: "Input/Output Interfaces"
+description: "Request and response types for all three Notion Workers"
+---
+
+## Overview
+
+Complete input and output type definitions for the three workers in this project.
+
+## write-agent-digest
+
+Creates a digest page in Notion documenting an agent's execution.
+
+### WriteAgentDigestInput
+
+```typescript
+interface WriteAgentDigestInput {
+  agent_name: string;
+  agent_emoji: string;
+  status_type: StatusType;
+  status_value: StatusValue;
+  run_time_chicago: string;
+  scope: string;
+  input_versions: string;
+  flagged_items: FlaggedItem[];
+  actions_taken: ActionsTaken;
+  summary: string;
+  needs_review: NeedsReview[];
+  escalations: Escalation[];
+  target_database: TargetDatabase;
+  doc_type: string;
+  client_relation_ids?: string[];
+  project_relation_ids?: string[];
+}
+```
+
+<ParamField path="agent_name" type="string" required>
+  Name of the agent (e.g., "Inbox Manager", "GitHub Insyncerator")
+</ParamField>
+
+<ParamField path="agent_emoji" type="string" required>
+  Emoji icon for the agent (e.g., "📧", "🐙")
+</ParamField>
+
+<ParamField path="status_type" type="StatusType" required>
+  Type of status: `"sync"`, `"snapshot"`, `"report"`, or `"heartbeat"`
+</ParamField>
+
+<ParamField path="status_value" type="StatusValue" required>
+  Outcome: `"complete"`, `"partial"`, `"failed"`, `"full_report"`, or `"stub"`
+</ParamField>
+
+<ParamField path="run_time_chicago" type="string" required>
+  ISO 8601 timestamp of execution (will be formatted to Chicago time)
+</ParamField>
+
+<ParamField path="scope" type="string" required>
+  Description of what the agent processed (e.g., "Processed 15 emails")
+</ParamField>
+
+<ParamField path="input_versions" type="string" required>
+  Version info for data sources (e.g., "Gmail API v1, filters v3")
+</ParamField>
+
+<ParamField path="flagged_items" type="FlaggedItem[]" required>
+  Array of items that need attention
+</ParamField>
+
+<ParamField path="actions_taken" type="ActionsTaken" required>
+  Tasks created or updated during execution
+</ParamField>
+
+<ParamField path="summary" type="string" required>
+  Brief summary of the execution
+</ParamField>
+
+<ParamField path="needs_review" type="NeedsReview[]" required>
+  Items requiring human review
+</ParamField>
+
+<ParamField path="escalations" type="Escalation[]" required>
+  Items escalated to other agents or humans
+</ParamField>
+
+<ParamField path="target_database" type="TargetDatabase" required>
+  Which database to write to: `"docs"` or `"home_docs"`
+</ParamField>
+
+<ParamField path="doc_type" type="string" required>
+  Document type (e.g., "Email Triage", "GitHub Sync")
+</ParamField>
+
+<ParamField path="client_relation_ids" type="string[]">
+  Array of Notion page IDs to link as client relations
+</ParamField>
+
+<ParamField path="project_relation_ids" type="string[]">
+  Array of Notion page IDs to link as project relations
+</ParamField>
+
+### WriteAgentDigestOutput
+
+```typescript
+type WriteAgentDigestOutput =
+  | {
+      success: true;
+      page_url: string;
+      page_id: string;
+      title: string;
+      is_error_titled: boolean;
+      is_heartbeat: boolean;
+    }
+  | { success: false; error: string };
+```
+
+**Success response:**
+
+<ResponseField name="success" type="true" required>
+  Operation succeeded
+</ResponseField>
+
+<ResponseField name="page_url" type="string" required>
+  Full Notion URL to the created digest page
+</ResponseField>
+
+<ResponseField name="page_id" type="string" required>
+  Notion page ID (32-character hex string)
+</ResponseField>
+
+<ResponseField name="title" type="string" required>
+  Full title of the created page
+</ResponseField>
+
+<ResponseField name="is_error_titled" type="boolean" required>
+  Whether the title includes "⚠️" or "❌" prefix (for failed/partial status)
+</ResponseField>
+
+<ResponseField name="is_heartbeat" type="boolean" required>
+  Whether this was a heartbeat digest (no actionable work)
+</ResponseField>
+
+**Error response:**
+
+<ResponseField name="success" type="false" required>
+  Operation failed
+</ResponseField>
+
+<ResponseField name="error" type="string" required>
+  Human-readable error message
+</ResponseField>
+
+### Example
+
+```typescript
+const input: WriteAgentDigestInput = {
+  agent_name: "Inbox Manager",
+  agent_emoji: "📧",
+  status_type: "sync",
+  status_value: "complete",
+  run_time_chicago: "2026-03-04T08:30:00Z",
+  scope: "Processed 12 emails",
+  input_versions: "Gmail API v1",
+  flagged_items: [
+    {
+      description: "Urgent client email",
+      task_link: "https://notion.so/abc123",
+    },
+  ],
+  actions_taken: {
+    created_tasks: [
+      {
+        name: "Respond to client inquiry",
+        notion_url: "https://notion.so/abc123",
+      },
+    ],
+    updated_tasks: [],
+  },
+  summary: "Triaged inbox, created 1 task",
+  needs_review: [],
+  escalations: [],
+  target_database: "docs",
+  doc_type: "Email Triage",
+};
+
+const result = await fetch("https://api.notion.dev/...", {
+  method: "POST",
+  body: JSON.stringify(input),
+});
+// { success: true, page_url: "https://notion.so/...", ... }
+```
+
+---
+
+## check-upstream-status
+
+Looks up the most recent digest page for an agent and returns its status.
+
+### CheckUpstreamStatusInput
+
+```typescript
+interface CheckUpstreamStatusInput {
+  agent_name: string;
+  max_age_hours?: number;
+  require_current_cycle?: boolean;
+}
+```
+
+<ParamField path="agent_name" type="string" required>
+  Name of the agent to check (must match AGENT_DIGEST_PATTERNS)
+</ParamField>
+
+<ParamField path="max_age_hours" type="number">
+  Maximum age in hours for the digest to be considered current (default: 24)
+</ParamField>
+
+<ParamField path="require_current_cycle" type="boolean">
+  If true, digest must be from the current business cycle (default: false)
+</ParamField>
+
+### CheckUpstreamStatusOutput
+
+```typescript
+interface CheckUpstreamStatusOutput {
+  found: boolean;
+  agent_name: string;
+  status: UpstreamStatus;
+  status_type: StatusType | null;
+  run_time: string | null;
+  run_time_age_hours: number | null;
+  is_stale: boolean;
+  is_heartbeat: boolean;
+  is_error_titled: boolean;
+  page_url: string | null;
+  page_id: string | null;
+  degraded: boolean;
+  data_completeness_notice: string;
+}
+```
+
+<ResponseField name="found" type="boolean" required>
+  Whether a digest page was found for this agent
+</ResponseField>
+
+<ResponseField name="agent_name" type="string" required>
+  Echo of the requested agent name
+</ResponseField>
+
+<ResponseField name="status" type="UpstreamStatus" required>
+  Parsed status: `"complete"`, `"partial"`, `"failed"`, `"full_report"`, `"stub"`, `"not_found"`, `"stale"`, or `"unknown"`
+</ResponseField>
+
+<ResponseField name="status_type" type="StatusType | null" required>
+  Type of status if parsed: `"sync"`, `"snapshot"`, `"report"`, or `"heartbeat"`
+</ResponseField>
+
+<ResponseField name="run_time" type="string | null" required>
+  Run time string from the digest (e.g., "2026-03-04 08:30 (America/Chicago)")
+</ResponseField>
+
+<ResponseField name="run_time_age_hours" type="number | null" required>
+  Hours since the digest was created (null if not found or unparseable)
+</ResponseField>
+
+<ResponseField name="is_stale" type="boolean" required>
+  True if age exceeds max_age_hours
+</ResponseField>
+
+<ResponseField name="is_heartbeat" type="boolean" required>
+  True if digest contains "Heartbeat: no actionable items"
+</ResponseField>
+
+<ResponseField name="is_error_titled" type="boolean" required>
+  True if page title starts with ⚠️ or ❌
+</ResponseField>
+
+<ResponseField name="page_url" type="string | null" required>
+  Full Notion URL to the digest page
+</ResponseField>
+
+<ResponseField name="page_id" type="string | null" required>
+  Notion page ID
+</ResponseField>
+
+<ResponseField name="degraded" type="boolean" required>
+  True if status is partial, failed, or stale
+</ResponseField>
+
+<ResponseField name="data_completeness_notice" type="string" required>
+  Human-readable explanation of data completeness (e.g., "Data is current")
+</ResponseField>
+
+### Example
+
+```typescript
+const input: CheckUpstreamStatusInput = {
+  agent_name: "GitHub Insyncerator",
+  max_age_hours: 2,
+};
+
+const result = await fetch("https://api.notion.dev/...", {
+  method: "POST",
+  body: JSON.stringify(input),
+});
+
+// Example response:
+// {
+//   found: true,
+//   agent_name: "GitHub Insyncerator",
+//   status: "complete",
+//   status_type: "sync",
+//   run_time: "2026-03-04 08:00 (America/Chicago)",
+//   run_time_age_hours: 1.5,
+//   is_stale: false,
+//   is_heartbeat: false,
+//   is_error_titled: false,
+//   page_url: "https://notion.so/...",
+//   page_id: "abc123...",
+//   degraded: false,
+//   data_completeness_notice: "Data is current"
+// }
+```
+
+---
+
+## create-handoff-marker
+
+Creates a handoff task and/or returns a formatted handoff block for escalations.
+
+### CreateHandoffMarkerInput
+
+```typescript
+interface CreateHandoffMarkerInput {
+  source_agent: string;
+  target_agent: string;
+  escalation_reason: string;
+  source_digest_url: string;
+  create_task: boolean;
+  task_priority?: TaskPriority;
+  client_relation_ids?: string[];
+  project_relation_ids?: string[];
+}
+```
+
+<ParamField path="source_agent" type="string" required>
+  Name of the agent creating the handoff
+</ParamField>
+
+<ParamField path="target_agent" type="string" required>
+  Name of the agent or person receiving the handoff
+</ParamField>
+
+<ParamField path="escalation_reason" type="string" required>
+  Why this item is being escalated
+</ParamField>
+
+<ParamField path="source_digest_url" type="string" required>
+  URL to the source agent's digest page
+</ParamField>
+
+<ParamField path="create_task" type="boolean" required>
+  Whether to create a Notion task page for this handoff
+</ParamField>
+
+<ParamField path="task_priority" type="TaskPriority">
+  Priority if creating a task: `"🔴 High"`, `"🟡 Medium"`, or `"🟢 Low"`
+</ParamField>
+
+<ParamField path="client_relation_ids" type="string[]">
+  Client page IDs to link to the task
+</ParamField>
+
+<ParamField path="project_relation_ids" type="string[]">
+  Project page IDs to link to the task
+</ParamField>
+
+### CreateHandoffMarkerOutput
+
+```typescript
+type CreateHandoffMarkerOutput =
+  | {
+      success: true;
+      handoff_block: string;
+      task_created: boolean;
+      task_url: string | null;
+      task_id: string | null;
+      duplicate_prevented: boolean;
+      existing_task_url: string | null;
+      escalation_capped: boolean;
+      needs_manual_review: boolean;
+    }
+  | { success: false; error: string };
+```
+
+**Success response:**
+
+<ResponseField name="success" type="true" required>
+  Operation succeeded
+</ResponseField>
+
+<ResponseField name="handoff_block" type="string" required>
+  Markdown-formatted handoff block to include in digest
+</ResponseField>
+
+<ResponseField name="task_created" type="boolean" required>
+  Whether a new task was created
+</ResponseField>
+
+<ResponseField name="task_url" type="string | null" required>
+  URL to the created task (null if not created)
+</ResponseField>
+
+<ResponseField name="task_id" type="string | null" required>
+  Notion page ID of the created task
+</ResponseField>
+
+<ResponseField name="duplicate_prevented" type="boolean" required>
+  Whether an existing open task was found, preventing duplicate creation
+</ResponseField>
+
+<ResponseField name="existing_task_url" type="string | null" required>
+  URL to existing task if duplicate was prevented
+</ResponseField>
+
+<ResponseField name="escalation_capped" type="boolean" required>
+  Whether escalation was rate-limited (max 3 per agent per day)
+</ResponseField>
+
+<ResponseField name="needs_manual_review" type="boolean" required>
+  Whether this handoff requires manual review
+</ResponseField>
+
+**Error response:**
+
+<ResponseField name="success" type="false" required>
+  Operation failed
+</ResponseField>
+
+<ResponseField name="error" type="string" required>
+  Human-readable error message
+</ResponseField>
+
+### Example
+
+```typescript
+const input: CreateHandoffMarkerInput = {
+  source_agent: "Inbox Manager",
+  target_agent: "Personal Ops Manager",
+  escalation_reason: "Complex scheduling conflict requiring manual resolution",
+  source_digest_url: "https://notion.so/...",
+  create_task: true,
+  task_priority: "🔴 High",
+  client_relation_ids: ["abc123"],
+};
+
+const result = await fetch("https://api.notion.dev/...", {
+  method: "POST",
+  body: JSON.stringify(input),
+});
+
+// Example response:
+// {
+//   success: true,
+//   handoff_block: "🤝 Escalated to Personal Ops Manager...\n\n...",
+//   task_created: true,
+//   task_url: "https://notion.so/...",
+//   task_id: "xyz789",
+//   duplicate_prevented: false,
+//   existing_task_url: null,
+//   escalation_capped: false,
+//   needs_manual_review: false
+// }
+```

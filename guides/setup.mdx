@@ -1,0 +1,229 @@
+---
+title: Local Development Setup
+description: Set up your local environment for jre-notion-workers development
+---
+
+## Prerequisites
+
+Before you begin, ensure you have the required runtime environments installed:
+
+<CardGroup cols={2}>
+  <Card title="Node.js ≥ 22" icon="node-js">
+    Production deployment target
+  </Card>
+  <Card title="Bun ≥ 1.1" icon="rocket">
+    Local development (recommended)
+  </Card>
+</CardGroup>
+
+<Note>
+Bun is recommended for local development as it provides native TypeScript support with no compilation step. However, the deployment target is Node.js 22.
+</Note>
+
+<Warning>
+Never use Bun-specific APIs (`Bun.file()`, `Bun.serve()`, etc.) in source files — they won't exist in the Node.js runtime at deployment.
+</Warning>
+
+### Additional Requirements
+
+- **TypeScript** ≥ 5.4 (strict mode required)
+- **ntn CLI** for deployment ([makenotion/workers-template](https://github.com/makenotion/workers-template))
+- Package manager: npm (lockfile committed) or bun
+
+## Installation
+
+<Steps>
+  <Step title="Clone the repository">
+    Navigate to your workspace and clone the jre-notion-workers repository.
+  </Step>
+
+  <Step title="Install dependencies">
+    <CodeGroup>
+      ```bash Bun
+      bun install
+      ```
+
+      ```bash npm
+      npm install
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Configure credentials">
+    Set up your environment variables. See the [Credentials Guide](/guides/credentials) for detailed options.
+  </Step>
+
+  <Step title="Verify installation">
+    Run the connection test to verify your setup:
+
+    <CodeGroup>
+      ```bash Standard
+      bun run test:connection
+      ```
+
+      ```bash 1Password
+      bun run test:connection:1p
+      ```
+    </CodeGroup>
+  </Step>
+</Steps>
+
+## Project Structure
+
+The repository follows a clean architecture pattern:
+
+```
+jre-notion-workers/
+├── src/
+│   ├── index.ts              # Worker registration
+│   ├── shared/               # Types, clients, parsers, utils
+│   │   ├── types.ts
+│   │   ├── notion-client.ts
+│   │   ├── agent-config.ts
+│   │   ├── status-parser.ts
+│   │   ├── date-utils.ts
+│   │   └── block-builder.ts
+│   └── workers/              # Worker implementations
+│       ├── write-agent-digest.ts
+│       ├── check-upstream-status.ts
+│       └── create-handoff-marker.ts
+├── tests/
+│   ├── unit/
+│   ├── integration/
+│   ├── evals/
+│   └── fixtures/
+├── .examples/                # Example payloads
+├── package.json
+├── tsconfig.json
+└── README.md
+```
+
+## Module System
+
+This project uses **ESM (ECMAScript Modules)**:
+
+- `"type": "module"` is set in package.json
+- Use `.js` extensions in import paths when importing from `.ts` files (NodeNext resolution)
+
+<CodeGroup>
+  ```typescript Correct
+  import { getNotionClient } from "../shared/notion-client.js";
+  ```
+
+  ```typescript Wrong
+  import { getNotionClient } from "../shared/notion-client";
+  ```
+</CodeGroup>
+
+## Development Commands
+
+### Running Locally
+
+<CodeGroup>
+  ```bash Standard (.env)
+  bun run dev
+  ```
+
+  ```bash .env.local
+  bun run dev:local
+  ```
+
+  ```bash 1Password
+  bun run dev:1p
+  ```
+</CodeGroup>
+
+Or directly run the entry point:
+
+```bash
+bun run src/index.ts
+```
+
+### Type Checking
+
+Run TypeScript compiler checks without emitting files:
+
+```bash
+npm run check
+```
+
+<Note>
+This must pass before deployment. The project uses `strict: true` with no exceptions.
+</Note>
+
+### Build
+
+Compile TypeScript for deployment:
+
+```bash
+npm run build
+```
+
+## Code Standards
+
+### Naming Conventions
+
+| Type | Convention | Example |
+|------|------------|----------|
+| Files | kebab-case | `write-agent-digest.ts` |
+| Functions/variables | camelCase | `getNotionClient` |
+| Types/interfaces | PascalCase | `AgentDigestInput` |
+| Constants | SCREAMING_SNAKE_CASE | `DOCS_DATABASE_ID` |
+| Notion IDs | 32-char hex, no dashes | `abc123...` |
+
+### Type Safety Rules
+
+<CardGroup cols={2}>
+  <Card title="Strict Mode" icon="shield-check">
+    `strict: true` — no exceptions
+  </Card>
+  <Card title="No any" icon="ban">
+    Use `unknown` then narrow
+  </Card>
+  <Card title="No Assertions" icon="exclamation-triangle">
+    No non-null assertions (`!`) on API responses
+  </Card>
+  <Card title="Explicit Returns" icon="arrow-right">
+    All async functions should have explicit return types
+  </Card>
+</CardGroup>
+
+### Architecture Pattern
+
+**Pure logic separation:**
+
+- **Business logic** (parsing, building, validating) → `src/shared/` → unit tested
+- **Orchestration** (validate input, call logic, call Notion, return result) → `src/workers/`
+
+## Runtime Environment
+
+<Accordion title="Local Development">
+  - Uses **Bun** runtime
+  - Native TypeScript execution
+  - No compilation step needed
+  - Fast test execution with built-in test runner
+</Accordion>
+
+<Accordion title="Production Deployment">
+  - Uses **Node.js 22** runtime
+  - Managed by Notion Workers platform
+  - Deployed via `ntn` CLI
+  - Pre-authenticated Notion client provided
+</Accordion>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Configure Credentials" icon="key" href="/guides/credentials">
+    Set up your environment variables and secrets
+  </Card>
+  <Card title="Run Tests" icon="flask" href="/guides/testing">
+    Learn about the testing strategy and run the test suite
+  </Card>
+  <Card title="Deploy Workers" icon="rocket" href="/guides/deployment">
+    Deploy your workers to production
+  </Card>
+  <Card title="Worker Architecture" icon="diagram-project" href="/concepts/architecture">
+    Understand the worker system design
+  </Card>
+</CardGroup>

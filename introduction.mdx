@@ -1,0 +1,126 @@
+---
+title: Introduction
+description: Notion Workers for the 11-agent custom agent system that enforce governance, reduce overhead, and enable reliable machine-to-machine coordination
+---
+
+# Introduction to jre-notion-workers
+
+jre-notion-workers is a set of Notion Workers built on the `@notionhq/workers` platform to support an 11-agent automation fleet. These workers enforce governance rules, reduce agent overhead, and make machine-to-machine coordination reliable across all agents.
+
+## What It Does
+
+The package provides three specialized workers that handle critical coordination tasks so individual agents don't have to remember or implement governance rules:
+
+### write-agent-digest
+
+Accepts structured agent output and creates a schema-compliant digest page in the Docs or Home Docs database. This worker handles:
+
+- Status line formatting and emoji derivation (✅ / ⚠️ / ❌)
+- Section ordering according to governance standards
+- ERROR-title naming for degraded runs
+- Heartbeat formatting for healthy silence detection
+- Validation of flagged items (ensuring each has `task_link` or `no_task_reason`)
+
+### check-upstream-status
+
+Finds the most recent digest for a given agent, parses its machine-readable status line and run timestamp, and returns a structured result. Use this at the start of any run that depends on upstream data to determine:
+
+- Whether upstream data is fresh or stale
+- The status of the last upstream run (complete/partial/failed)
+- Whether to include a `data_completeness_notice` in your digest
+
+### create-handoff-marker
+
+Creates a handoff record when one agent escalates to another. This worker:
+
+- Returns a pre-formatted Escalations block ready to paste into your digest
+- Optionally creates a Notion Task for tracking
+- Enforces a **circuit breaker**: no duplicate handoff within 7 days for the same source→target pair
+- Enforces a **re-escalation cap**: maximum 2 escalations in the same direction within 7 days
+- Sets `needs_manual_review` flag when escalation cap is reached
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Governance Enforcement" icon="shield-check">
+    Automatically enforces status line formats, page title patterns, and section ordering so agents don't have to remember the rules
+  </Card>
+  
+  <Card title="Circuit Breakers" icon="bolt-slash">
+    Prevents duplicate handoffs and caps re-escalations to avoid runaway loops between agents
+  </Card>
+  
+  <Card title="Schema Validation" icon="check-circle">
+    Validates all input using JSON schemas before creating Notion pages, catching errors early
+  </Card>
+  
+  <Card title="Machine-Readable Status" icon="code">
+    Parses and generates standardized status lines that agents can read programmatically
+  </Card>
+</CardGroup>
+
+## Governance Rules Enforced by Code
+
+These workers automate the following governance standards:
+
+- **Status lines**: Sync / Snapshot / Report status and emoji (✅ / ⚠️ / ❌) derived from input; agents don't format them
+- **Page titles**: Normal runs use `{emoji} {Digest Type} — {date}`. Degraded runs use `{Digest Type} ERROR — {date}` (no emoji)
+- **Heartbeat**: "Heartbeat: no actionable items" added automatically when appropriate so Morning Briefing can distinguish healthy silence from failure
+- **Flagged items**: Every flagged item must have `task_link` or `no_task_reason`; invalid input is rejected
+- **Actions Taken**: Always rendered (Created Tasks / Updated Tasks / No Tasks Created)
+- **Handoff circuit breaker**: No duplicate handoff task for the same source→target within 7 days
+- **Escalation cap**: At most 2 escalations in the same direction within 7 days; then `needs_manual_review` is set
+
+## Agent Workflow
+
+Agents in the 11-agent system follow this pattern:
+
+<Steps>
+  <Step title="Check upstream status">
+    At run start, call **check-upstream-status** for any upstream agents you depend on. Use `data_completeness_notice` and `degraded` in your digest when upstream is stale or failed.
+  </Step>
+  
+  <Step title="Handle escalations">
+    During the run, call **create-handoff-marker** when escalating to another agent (with or without creating a Task).
+  </Step>
+  
+  <Step title="Write digest">
+    At run end, call **write-agent-digest** with your structured output. It creates the page with the correct schema, status line, and sections.
+  </Step>
+</Steps>
+
+## Supported Agents
+
+The workers support these agents with their corresponding digest title patterns:
+
+| Agent | Digest Title Pattern | Target DB |
+|-------|---------------------|----------|
+| Inbox Manager | Email Triage | docs |
+| Personal Ops Manager | Personal Triage | home_docs |
+| GitHub Insyncerator | GitHub Sync | docs |
+| Client Repo Auditor | Client Repo Audit | docs |
+| Docs Librarian | Docs Quick Scan, Docs Cleanup Report | docs |
+| VEP Weekly Reporter | VEP Weekly Activity Report | docs |
+| Home & Life Watcher | Home & Life Weekly Digest | home_docs |
+| Template Freshness Watcher | Setup Template Freshness Report | docs |
+| Time Log Auditor | Time Log Audit | docs |
+| Client Health Scorecard | Client Health Scorecard | docs |
+| Morning Briefing | Morning Briefing | docs |
+
+## Alpha Status
+
+<Warning>
+`@notionhq/workers` is in **alpha**. APIs and deployment behavior may change. See [makenotion/workers-template](https://github.com/makenotion/workers-template) for the latest.
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install the package and set up credentials
+  </Card>
+  
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Register your first worker and make test calls
+  </Card>
+</CardGroup>

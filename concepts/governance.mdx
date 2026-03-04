@@ -1,0 +1,660 @@
+---
+title: "Governance & Safety"
+description: "Boundary rules, validation patterns, and safety mechanisms that protect the system"
+---
+
+## Overview
+
+The jre-notion-workers system enforces strict governance rules to prevent errors, protect data, and ensure consistent behavior. These rules are **enforced in code** - not just documented.
+
+<Warning>
+  All rules in this document apply to **all code** in `src/` and any new workers added to the project.
+</Warning>
+
+## Secrets and Configuration
+
+### Environment Variables
+
+All credentials and configuration come from `process.env`:
+
+<CodeGroup>
+
+```typescript notion-client.ts
+import { Client } from "@notionhq/client";
+
+export function getNotionClient(): Client {
+  const token = process.env.NOTION_TOKEN;
+  if (!token) throw new Error("NOTION_TOKEN not set");
+  return new Client({ auth: token });
+}
+
+export function getDocsDatabaseId(): string {
+  const id = process.env.DOCS_DATABASE_ID;
+  if (!id) throw new Error("DOCS_DATABASE_ID not set");
+  return id;
+}
+```
+
+```bash .env.example
+NOTION_TOKEN=secret_...
+DOCS_DATABASE_ID=abc123...
+HOME_DOCS_DATABASE_ID=def456...
+TASKS_DATABASE_ID=ghi789...
+```
+
+</CodeGroup>
+
+### Rules
+
+<AccordionGroup>
+  <Accordion title="Never hardcode secrets">
+    ❌ **Wrong**:
+    ```typescript
+    const token = "secret_123abc...";
+    const dbId = "abc123def456...";
+    ```
+    
+    ✅ **Correct**:
+    ```typescript
+    const token = process.env.NOTION_TOKEN;
+    const dbId = process.env.DOCS_DATABASE_ID;
+    ```
+  </Accordion>
+
+  <Accordion title="Never log secrets">
+    ❌ **Wrong**:
+    ```typescript
+    console.log("Token:", process.env.NOTION_TOKEN);
+    console.log("Config:", { token, dbId });
+    ```
+    
+    ✅ **Correct**:
+    ```typescript
+    console.log("Initializing Notion client...");
+    console.log("Using database:", dbId.slice(0, 8) + "...");
+    ```
+  </Accordion>
+
+  <Accordion title="Never commit .env files">
+    `.env` and `.env.local` are gitignored. Only commit `.env.example` with placeholder values.
+    
+    ```bash .gitignore
+    .env
+    .env.local
+    .env.*.local
+    ```
+  </Accordion>
+
+  <Accordion title="Production secrets via ntn CLI">
+    For deployment, secrets are set via:
+    ```bash
+    ntn workers secrets set NOTION_TOKEN secret_...
+    ntn workers secrets set DOCS_DATABASE_ID abc123...
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Input Validation
+
+### Validation Pattern
+
+Every worker validates input at the start of `execute`:
+
+```typescript
+export async function executeWriteAgentDigest(
+  input: WriteAgentDigestInput,
+  notion: Client
+): Promise<WriteAgentDigestOutput> {
+  // 1. Validate agent name
+  if (!input.agent_name || !VALID_AGENT_NAMES.includes(input.agent_name)) {
+    return { success: false, error: `Invalid agent_name: ${input.agent_name}` };
+  }
+  
+  // 2. Validate required fields
+  if (!input.status_type || !input.status_value || !input.run_time_chicago) {
+    return { 
+      success: false, 
+      error: "Missing required fields: status_type, status_value, run_time_chicago" 
+    };
+  }
+  
+  // 3. Validate flagged items
+  const err = validateFlaggedItems(input.flagged_items ?? []);
+  if (err) return { success: false, error: err };
+  
+  // ... proceed with logic
+}
+```
+
+### Rules
+
+<CardGroup cols={2}>
+  <Card title="Always validate" icon="shield-check">
+    Check required fields and allowed values at the start of `execute` before any Notion API calls.
+  </Card>
+  
+  <Card title="Never trust input" icon="circle-exclamation">
+    Input shape and content must be validated. TypeScript types are not runtime validation.
+  </Card>
+  
+  <Card title="Never throw" icon="ban">
+    Return structured errors instead of throwing:
+    ```typescript
+    return { success: false, error: "..." };
+    ```
+  </Card>
+  
+  <Card title="Clear messages" icon="message">
+    Error messages should be specific and actionable:
+    ```typescript
+    error: `Invalid agent_name: ${input.agent_name}`
+    ```
+  </Card>
+</CardGroup>
+
+### Flagged Items Validation
+
+The system enforces a strict rule for flagged items:
+
+<Note>
+  **Governance Rule**: Every flagged item must have either `task_link` OR `no_task_reason`. Never both, never neither.
+</Note>
+
+```typescript
+function validateFlaggedItems(items: FlaggedItem[]): string | null {
+  for (const item of items) {
+    if (item.task_link || item.no_task_reason) continue;
+    return `FlaggedItem must have task_link or no_task_reason: "${item.description}"`;
+  }
+  return null;
+}
+```
+
+Examples:
+
+<CodeGroup>
+
+```json Valid - Has task_link
+{
+  "description": "Client repo needs security update",
+  "task_link": "https://notion.so/abc123"
+}
+```
+
+```json Valid - Has no_task_reason
+{
+  "description": "GitHub API rate limit approaching",
+  "no_task_reason": "Monitoring only - no action needed"
+}
+```
+
+```json Invalid - Has neither
+{
+  "description": "Something flagged"
+}
+```
+
+```json Invalid - Has both
+{
+  "description": "Something flagged",
+  "task_link": "https://notion.so/abc123",
+  "no_task_reason": "Already handled"
+}
+```
+
+</CodeGroup>
+
+## Notion API Usage
+
+### Pagination
+
+<Warning>
+  **Never assume a single page of results.** Use pagination where the API supports it.
+</Warning>
+
+```typescript
+// ✅ Correct - handles pagination
+let allResults = [];
+let cursor = undefined;
+
+do {
+  const response = await notion.databases.query({
+    database_id: dbId,
+    start_cursor: cursor,
+  });
+  allResults.push(...response.results);
+  cursor = response.next_cursor;
+} while (cursor);
+```
+
+### Error Handling
+
+<AccordionGroup>
+  <Accordion title="Wrap all API calls in try/catch">
+    ```typescript
+    try {
+      const page = await notion.pages.create({
+        parent: { database_id: dbId },
+        properties: properties as never,
+        children: blocks as never[],
+      });
+      return { success: true, page_id: page.id, page_url: page.url };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.error("[worker] Notion API error", message);
+      return { success: false, error: message };
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Never let exceptions bubble">
+    Workers must catch all errors and return structured error objects. Uncaught exceptions break the worker runtime.
+  </Accordion>
+
+  <Accordion title="Log errors for debugging">
+    ```typescript
+    console.error("[worker-name] Notion API error", message);
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Scope Boundaries
+
+<Warning>
+  **Never write to or delete databases outside the documented scope:**
+  - Docs database (`DOCS_DATABASE_ID`)
+  - Home Docs database (`HOME_DOCS_DATABASE_ID`)
+  - Tasks database (`TASKS_DATABASE_ID`)
+</Warning>
+
+From `AGENTS.md`:
+> No worker may read or write outside its declared scope without an explicit governance review.
+
+## Output Contracts
+
+### Structured Results
+
+<Note>
+  **Never return raw Notion API responses.** Map to typed result objects.
+</Note>
+
+❌ **Wrong**:
+```typescript
+return await notion.pages.create({ ... });
+```
+
+✅ **Correct**:
+```typescript
+const page = await notion.pages.create({ ... });
+return {
+  success: true,
+  page_id: page.id,
+  page_url: page.url,
+  title: title,
+  is_error_titled: isErrorTitled,
+  is_heartbeat: heartbeat,
+};
+```
+
+### Success/Error Pattern
+
+All workers use discriminated unions:
+
+<CodeGroup>
+
+```typescript Success
+type WriteAgentDigestOutput = 
+  | {
+      success: true;
+      page_url: string;
+      page_id: string;
+      title: string;
+      is_error_titled: boolean;
+      is_heartbeat: boolean;
+    }
+  | { success: false; error: string };
+```
+
+```typescript Usage
+const result = await executeWriteAgentDigest(input, notion);
+
+if (result.success) {
+  console.log("Created page:", result.page_url);
+  console.log("Title:", result.title);
+} else {
+  console.error("Error:", result.error);
+}
+```
+
+</CodeGroup>
+
+## Governance Rules Enforced in Code
+
+These governance patterns are implemented in the worker logic:
+
+### Status Line Format
+
+Status lines use standardized format and emoji:
+
+```typescript
+export function buildStatusLine(statusType: StatusType, statusValue: StatusValue): string {
+  const emoji = 
+    statusValue === "complete" || statusValue === "full_report" 
+      ? "✅" 
+      : statusValue === "partial" || statusValue === "stub" 
+        ? "⚠️" 
+        : "❌";
+  
+  const label = 
+    statusType === "sync" ? "Sync Status" :
+    statusType === "snapshot" ? "Snapshot Status" : 
+    "Report Status";
+  
+  const value = /* ... computed based on type and value ... */;
+  
+  return `${label}: ${emoji} ${value}`;
+}
+```
+
+<Info>
+  Workers don't invent formats - they use shared helpers to ensure consistency.
+</Info>
+
+### Page Title Format
+
+Page titles follow strict patterns:
+
+```typescript
+function buildPageTitle(params: {
+  emoji: string;
+  digestType: string;
+  date: string;
+  isError: boolean;
+}): string {
+  const { emoji, digestType, date, isError } = params;
+  
+  // Degraded runs omit emoji
+  if (isError) return `${digestType} ERROR — ${date}`;
+  
+  // Normal runs
+  return `${emoji} ${digestType} — ${date}`;
+}
+```
+
+### Handoff Circuit Breaker
+
+Prevents duplicate handoff tasks:
+
+```typescript
+const HANDOFF_WINDOW_DAYS = 7;
+
+// Check for existing open handoff task
+const existingResponse = await notion.databases.query({
+  database_id: tasksDbId,
+  filter: {
+    property: "Name",
+    title: {
+      contains: `Handoff: ${input.source_agent} → ${input.target_agent}`,
+    },
+  },
+  sorts: [{ timestamp: "created_time", direction: "descending" }],
+  page_size: 20,
+});
+
+const withinWindow = existingResponse.results.filter(p => {
+  const ct = p.created_time;
+  if (!ct) return false;
+  return new Date(ct).getTime() >= sinceMs;
+});
+
+const existingOpen = withinWindow.filter(isOpen);
+
+if (existingOpen.length > 0) {
+  console.log("[create-handoff-marker] circuit breaker: existing handoff task");
+  return {
+    success: true,
+    duplicate_prevented: true,
+    existing_task_url: existingOpen[0].url,
+    // ...
+  };
+}
+```
+
+<Warning>
+  **Governance Rule**: No duplicate handoff task for the same source→target within 7 days.
+</Warning>
+
+### Escalation Cap
+
+Limits re-escalations in the same direction:
+
+```typescript
+const ESCALATION_CAP = 2;
+
+const countSameDirection = withinWindow.length;
+
+if (countSameDirection >= ESCALATION_CAP) {
+  escalationCapped = true;
+  needsManualReview = true;
+  
+  console.log(
+    "[create-handoff-marker] escalation cap reached", 
+    input.source_agent, "→", input.target_agent
+  );
+  
+  return {
+    success: true,
+    task_created: false,
+    escalation_capped: true,
+    needs_manual_review: true,
+    // ...
+  };
+}
+```
+
+<Warning>
+  **Governance Rule**: At most 2 escalations in the same direction within 7 days. After that, `needs_manual_review` is set.
+</Warning>
+
+## Testing and Deployment
+
+### Test Isolation
+
+<Note>
+  **Never use production credentials in tests.** Use separate test database IDs and tokens.
+</Note>
+
+```typescript
+const TEST_DOCS_DATABASE_ID = process.env.TEST_DOCS_DATABASE_ID;
+const TEST_NOTION_TOKEN = process.env.TEST_NOTION_TOKEN;
+
+describe.skipIf(!TEST_DOCS_DATABASE_ID)("integration tests", () => {
+  // Tests only run if test credentials are set
+});
+```
+
+### Pre-deployment Checks
+
+<CardGroup cols={2}>
+  <Card title="Type Check" icon="check">
+    ```bash
+    npm run check
+    ```
+    Must pass before merge/deploy.
+  </Card>
+  
+  <Card title="Test Suite" icon="vial">
+    ```bash
+    bun test
+    ```
+    All tests must pass.
+  </Card>
+  
+  <Card title="No 'any' Types" icon="ban">
+    Never introduce `any` to fix type errors without documented reason and review.
+  </Card>
+  
+  <Card title="Strict Mode" icon="shield">
+    TypeScript `strict: true` - no exceptions.
+  </Card>
+</CardGroup>
+
+### Deployment Safety
+
+<Warning>
+  **Never merge or deploy if:**
+  - `npm run check` (tsc) fails
+  - `bun test` fails
+  - Type errors exist
+  - Strict checks are disabled
+</Warning>
+
+## Runtime Constraints
+
+### No Background Tasks
+
+```typescript
+// ❌ Wrong - workers don't run background tasks
+setInterval(() => { /* ... */ }, 60000);
+setTimeout(() => { /* ... */ }, 5000);
+```
+
+<Note>
+  **Workers run once and exit.** Never start timers, background tasks, or servers.
+</Note>
+
+### No Bun-specific APIs
+
+```typescript
+// ❌ Wrong - Bun APIs don't exist in production (Node.js)
+const file = Bun.file("data.json");
+Bun.serve({ /* ... */ });
+
+// ✅ Correct - use standard Node.js APIs
+import { readFile } from "node:fs/promises";
+const data = await readFile("data.json", "utf-8");
+```
+
+<Warning>
+  Development uses Bun, but deployment runs on Node.js ≥ 22. Only use cross-compatible APIs.
+</Warning>
+
+## Code Standards
+
+### Type Safety
+
+<AccordionGroup>
+  <Accordion title="strict: true - no exceptions">
+    ```json tsconfig.json
+    {
+      "compilerOptions": {
+        "strict": true,
+        "noImplicitAny": true,
+        "strictNullChecks": true,
+        // ...
+      }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="No 'any' - use 'unknown'">
+    ❌ **Wrong**:
+    ```typescript
+    function process(data: any) { /* ... */ }
+    ```
+    
+    ✅ **Correct**:
+    ```typescript
+    function process(data: unknown) {
+      if (typeof data === "object" && data !== null) {
+        // Type narrowing
+      }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="No non-null assertions on API responses">
+    ❌ **Wrong**:
+    ```typescript
+    const status = response.properties.Status!.select!.name!;
+    ```
+    
+    ✅ **Correct**:
+    ```typescript
+    const props = response.properties ?? {};
+    const statusProp = props["Status"];
+    if (!statusProp || typeof statusProp !== "object") return null;
+    const sel = "select" in statusProp ? statusProp.select?.name : null;
+    ```
+  </Accordion>
+
+  <Accordion title="Explicit return types">
+    ```typescript
+    export async function executeWriteAgentDigest(
+      input: WriteAgentDigestInput,
+      notion: Client
+    ): Promise<WriteAgentDigestOutput> {
+      // ...
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Naming Conventions
+
+| Element | Convention | Example |
+|---------|------------|----------|
+| Files | kebab-case | `write-agent-digest.ts` |
+| Functions/Variables | camelCase | `buildPageTitle`, `isHeartbeat` |
+| Types/Interfaces | PascalCase | `WriteAgentDigestInput` |
+| Constants | SCREAMING_SNAKE_CASE | `VALID_AGENT_NAMES`, `ESCALATION_CAP` |
+| Notion IDs | 32-char hex, no dashes | `DOCS_DATABASE_ID` |
+
+## Summary
+
+<CardGroup cols={3}>
+  <Card title="Validate Input" icon="shield-check">
+    Check all inputs before any Notion API calls
+  </Card>
+  
+  <Card title="Use Environment" icon="key">
+    Read secrets from `process.env`, never hardcode
+  </Card>
+  
+  <Card title="Catch Errors" icon="circle-exclamation">
+    Wrap API calls, return structured errors
+  </Card>
+  
+  <Card title="Stay in Scope" icon="border-all">
+    Only access declared databases
+  </Card>
+  
+  <Card title="Enforce Rules" icon="gavel">
+    Implement governance rules in code
+  </Card>
+  
+  <Card title="Test Safely" icon="vial-circle-check">
+    Isolate tests from production
+  </Card>
+</CardGroup>
+
+<Info>
+  These rules ensure the system is safe, predictable, and maintainable. They are enforced through TypeScript types, runtime validation, and code review.
+</Info>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="sitemap" href="/concepts/architecture">
+    Understand the system design and layers
+  </Card>
+  <Card title="Agent System" icon="users" href="/concepts/agent-system">
+    Learn about the 11 agents and their patterns
+  </Card>
+  <Card title="API Reference" icon="code" href="/workers/write-agent-digest">
+    Detailed worker documentation
+  </Card>
+  <Card title="Development Guide" icon="laptop-code" href="/guides/setup">
+    Set up your local environment
+  </Card>
+</CardGroup>

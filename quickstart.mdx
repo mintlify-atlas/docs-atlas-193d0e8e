@@ -1,80 +1,436 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Register your first worker and learn how to use write-agent-digest, check-upstream-status, and create-handoff-marker
 ---
 
-## Get started in three steps
+# Quickstart Guide
 
-Get your documentation site running locally and make your first customization.
+This guide shows you how to register the three Notion Workers and make your first calls.
 
-### Step 1: Set up your local environment
+## Worker Registration
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+All three workers are registered in `src/index.ts` using the `@notionhq/workers` Worker class:
 
-### Step 2: Deploy your changes
+```typescript src/index.ts
+import { Worker } from "@notionhq/workers";
+import { executeWriteAgentDigest } from "./workers/write-agent-digest.js";
+import { executeCheckUpstreamStatus } from "./workers/check-upstream-status.js";
+import { executeCreateHandoffMarker } from "./workers/create-handoff-marker.js";
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+const worker = new Worker();
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+// Register write-agent-digest
+worker.tool("write-agent-digest", {
+  title: "Write Agent Digest",
+  description: "Creates a governance-compliant agent digest or report page in the Docs database.",
+  schema: writeDigestSchema,
+  execute: (input, context) => executeWriteAgentDigest(input, context.notion),
+});
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+// Register check-upstream-status
+worker.tool("check-upstream-status", {
+  title: "Check Upstream Status",
+  description: "Finds the most recent digest page for a given agent and returns structured status.",
+  schema: checkUpstreamStatusSchema,
+  execute: (input, context) => executeCheckUpstreamStatus(input, context.notion),
+});
 
-### Step 3: Go live
+// Register create-handoff-marker
+worker.tool("create-handoff-marker", {
+  title: "Create Handoff Marker",
+  description: "Creates a structured handoff record when an agent escalates to another.",
+  schema: createHandoffMarkerSchema,
+  execute: (input, context) => executeCreateHandoffMarker(input, context.notion),
+});
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+export default worker;
+```
 
-## Next steps
+## Start the Worker
 
-Now that you have your docs running, explore these key features:
+Run the worker locally:
 
-<CardGroup cols={2}>
+<CodeGroup>
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
+```bash Default
+bun run dev
+```
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
+```bash .env.local
+bun run dev:local
+```
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
+```bash 1Password
+bun run dev:1p
+```
 
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
+</CodeGroup>
 
-</CardGroup>
+Alternatively, run the entry file directly:
+
+```bash
+bun run src/index.ts
+```
+
+## Worker 1: write-agent-digest
+
+Creates a governance-compliant digest page with proper status lines, section ordering, and validation.
+
+### Example: Successful Sync Run
+
+```typescript
+const input = {
+  agent_name: "GitHub Insyncerator",
+  agent_emoji: "🔄",
+  status_type: "sync",
+  status_value: "complete",
+  run_time_chicago: "2026-02-28T09:00:00-06:00",
+  scope: "All open PRs and recent commits in tracked repos",
+  input_versions: "None",
+  flagged_items: [
+    { 
+      description: "PR #42 needs review", 
+      task_link: "https://www.notion.so/task-abc123",
+      no_task_reason: ""
+    },
+    { 
+      description: "Spike in failed CI on main", 
+      task_link: "https://www.notion.so/task-def456",
+      no_task_reason: ""
+    },
+  ],
+  actions_taken: {
+    created_tasks: [
+      { name: "Review PR #42", notion_url: "https://www.notion.so/task-abc123" }
+    ],
+    updated_tasks: [
+      { name: "Investigate CI failures", notion_url: "https://www.notion.so/task-def456" }
+    ],
+  },
+  summary: "Synced 3 repos. 2 items flagged, 1 escalation to Client Repo Auditor.",
+  needs_review: [],
+  escalations: [
+    {
+      escalated_to: "Client Repo Auditor",
+      escalation_reason: "Spike in CI failures may need client repo audit",
+      escalation_owner: "Client Repo Auditor",
+      handoff_complete: false,
+    },
+  ],
+  target_database: "docs",
+  doc_type: "Agent Digest",
+  client_relation_ids: [],
+  project_relation_ids: [],
+};
+
+// Call the worker
+const result = await worker.execute(input);
+// Returns: { success: true, page_url: "https://notion.so/...", title: "🔄 GitHub Sync — Feb 28, 2026" }
+```
+
+### Schema Requirements
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+Every **flagged item** must have either `task_link` (Notion URL) or `no_task_reason` (explanation). The worker rejects invalid input.
 </Note>
+
+**Status Types:**
+- `sync` - Continuous synchronization
+- `snapshot` - Point-in-time capture
+- `report` - Analysis or summary
+- `heartbeat` - Health check with no items
+
+**Status Values:**
+- `complete` - Full success
+- `partial` - Some items processed
+- `failed` - Critical failure
+- `full_report` - Comprehensive analysis
+- `stub` - Placeholder run
+
+**Target Databases:**
+- `docs` - Most agents write here
+- `home_docs` - Personal Ops Manager, Home & Life Watcher
+
+## Worker 2: check-upstream-status
+
+Checks whether an upstream agent's most recent digest is fresh and successful.
+
+### Example: Check Multiple Upstream Agents
+
+```typescript
+const upstreamAgents = [
+  "Time Log Auditor",
+  "Docs Librarian",
+  "VEP Weekly Reporter",
+];
+
+for (const agentName of upstreamAgents) {
+  const result = await checkUpstreamStatus({
+    agent_name: agentName,
+    max_age_hours: 48,
+    require_current_cycle: true,
+  });
+  
+  if (result.degraded) {
+    console.log(`⚠️ ${agentName} is degraded: ${result.data_completeness_notice}`);
+    // Include data_completeness_notice in your digest
+  } else {
+    console.log(`✅ ${agentName} is current (${result.status})`);
+  }
+}
+```
+
+### Response Structure
+
+```typescript
+{
+  success: true,
+  agent_name: "Docs Librarian",
+  status: "complete",
+  run_time: "2026-03-02T14:30:00-06:00",
+  page_url: "https://notion.so/docs-quick-scan-mar-2",
+  degraded: false,
+  data_completeness_notice: null
+}
+```
+
+**Degraded Response Example:**
+
+```typescript
+{
+  success: true,
+  agent_name: "VEP Weekly Reporter",
+  status: "failed",
+  run_time: "2026-02-24T09:00:00-06:00",
+  page_url: "https://notion.so/vep-weekly-feb-24",
+  degraded: true,
+  data_completeness_notice: "⚠️ VEP Weekly Reporter last ran 8 days ago (status: failed). Data may be incomplete."
+}
+```
+
+<Steps>
+  <Step title="Call check-upstream-status at run start">
+    Query each upstream agent your agent depends on.
+  </Step>
+  
+  <Step title="Check the degraded flag">
+    If `degraded: true`, include `data_completeness_notice` in your digest's summary or Data Quality section.
+  </Step>
+  
+  <Step title="Proceed with your run">
+    Use the upstream status to decide whether to proceed normally or mark your own run as degraded.
+  </Step>
+</Steps>
+
+## Worker 3: create-handoff-marker
+
+Creates a handoff record when escalating to another agent. Enforces circuit breakers and escalation caps.
+
+### Example: Create Handoff with Task
+
+```typescript
+const handoffInput = {
+  source_agent: "GitHub Insyncerator",
+  target_agent: "Client Repo Auditor",
+  escalation_reason: "Stale spike in CI failures; needs client repo audit",
+  source_digest_url: "https://www.notion.so/github-sync-2026-02-28-abc123",
+  create_task: true,
+  task_priority: "🟡 Medium",
+  client_relation_ids: [],
+  project_relation_ids: [],
+};
+
+const result = await createHandoffMarker(handoffInput);
+
+if (result.success) {
+  // Paste result.handoff_block into your digest's Escalations section
+  console.log(result.handoff_block);
+  
+  if (result.duplicate_prevented) {
+    console.log(`⚠️ Duplicate handoff prevented. Existing task: ${result.existing_task_url}`);
+  }
+  
+  if (result.escalation_capped) {
+    console.log(`⚠️ Escalation cap reached. Move to Needs Manual Review.`);
+  }
+}
+```
+
+### Response Structure
+
+```typescript
+{
+  success: true,
+  handoff_block: "- **Escalated to:** Client Repo Auditor\n- **Reason:** Stale spike in CI failures\n- **Task:** [View Task](https://notion.so/task-xyz)\n- **Owner:** Client Repo Auditor",
+  task_url: "https://notion.so/task-xyz",
+  duplicate_prevented: false,
+  existing_task_url: null,
+  escalation_capped: false,
+  needs_manual_review: false
+}
+```
+
+### Circuit Breaker Rules
+
+<Warning>
+**No duplicate handoff within 7 days** for the same source→target pair. If a recent handoff exists, `duplicate_prevented: true` and `existing_task_url` is returned.
+</Warning>
+
+<Warning>
+**Escalation cap:** Maximum 2 escalations in the same direction within 7 days. When exceeded, `escalation_capped: true` and `needs_manual_review: true`. Move the item to your digest's "Needs Manual Review" section.
+</Warning>
+
+### Task Priority Options
+
+- `🔴 High`
+- `🟡 Medium`
+- `🟢 Low`
+
+## Complete Agent Workflow
+
+Here's how a typical agent uses all three workers:
+
+<Steps>
+  <Step title="Check upstream dependencies">
+    ```typescript
+    const upstreamStatus = await checkUpstreamStatus({
+      agent_name: "Time Log Auditor",
+      max_age_hours: 48,
+      require_current_cycle: true,
+    });
+    
+    const dataQualityNotice = upstreamStatus.degraded 
+      ? upstreamStatus.data_completeness_notice 
+      : null;
+    ```
+  </Step>
+  
+  <Step title="Perform your agent's work">
+    ```typescript
+    // Your agent logic here
+    const flaggedItems = processTasks();
+    const actionsTaken = createOrUpdateTasks();
+    ```
+  </Step>
+  
+  <Step title="Create handoffs if needed">
+    ```typescript
+    const handoff = await createHandoffMarker({
+      source_agent: "Your Agent",
+      target_agent: "Target Agent",
+      escalation_reason: "Reason for escalation",
+      source_digest_url: "https://notion.so/your-digest",
+      create_task: true,
+      task_priority: "🟡 Medium",
+      client_relation_ids: [],
+      project_relation_ids: [],
+    });
+    
+    const escalations = [{
+      escalated_to: "Target Agent",
+      escalation_reason: "Reason",
+      escalation_owner: "Target Agent",
+      handoff_complete: false,
+    }];
+    ```
+  </Step>
+  
+  <Step title="Write your digest">
+    ```typescript
+    const digest = await writeAgentDigest({
+      agent_name: "Your Agent",
+      agent_emoji: "🤖",
+      status_type: "sync",
+      status_value: "complete",
+      run_time_chicago: new Date().toISOString(),
+      scope: "All items in scope",
+      input_versions: dataQualityNotice || "None",
+      flagged_items,
+      actions_taken,
+      summary: "Run summary",
+      needs_review: [],
+      escalations,
+      target_database: "docs",
+      doc_type: "Agent Digest",
+      client_relation_ids: [],
+      project_relation_ids: [],
+    });
+    
+    console.log(`✅ Digest created: ${digest.page_url}`);
+    ```
+  </Step>
+</Steps>
+
+## Run Tests
+
+Verify everything works:
+
+<CodeGroup>
+
+```bash All tests
+bun test
+```
+
+```bash Watch mode
+bun test --watch
+```
+
+```bash Integration tests
+bun test tests/integration/
+```
+
+```bash Coverage
+bun test --coverage
+```
+
+```bash 1Password
+bun run test:1p
+```
+
+</CodeGroup>
+
+<Note>
+Integration tests require `TEST_NOTION_TOKEN` and `TEST_DOCS_DATABASE_ID` in your environment. **Always use a dedicated test database, never production.**
+</Note>
+
+## Deploy to Production
+
+Build and deploy with the ntn CLI:
+
+<Steps>
+  <Step title="Type check">
+    ```bash
+    npm run check
+    ```
+  </Step>
+  
+  <Step title="Build">
+    ```bash
+    npm run build
+    ```
+  </Step>
+  
+  <Step title="Deploy">
+    ```bash
+    ntn workers deploy
+    ```
+  </Step>
+</Steps>
+
+Or use the combined script:
+
+```bash
+npm run deploy
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="API Reference" icon="book">
+    Detailed schemas and return types for all three workers
+  </Card>
+  
+  <Card title="Governance Docs" icon="shield-check">
+    Read WORKERS.md, AGENTS.md, ARCHITECTURE.md, and GUARDRAILS.md in the repository
+  </Card>
+</CardGroup>

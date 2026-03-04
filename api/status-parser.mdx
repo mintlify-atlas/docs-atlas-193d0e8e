@@ -1,0 +1,259 @@
+---
+title: "Status Parser"
+description: "Parse status lines and run times from digest page content"
+---
+
+## Overview
+
+Utilities for parsing status information from the first 10 lines of a digest page. Used by `check-upstream-status` to extract the agent's execution status and run time.
+
+## Types
+
+### ParsedStatus
+
+```typescript
+interface ParsedStatus {
+  status_type: StatusType;
+  status_value: StatusValue;
+  raw_line: string;
+}
+```
+
+Result of parsing a status line from digest content.
+
+<ParamField path="status_type" type="StatusType" required>
+  Type of status: `"sync"`, `"snapshot"`, `"report"`, or `"heartbeat"`
+</ParamField>
+
+<ParamField path="status_value" type="StatusValue" required>
+  Outcome: `"complete"`, `"partial"`, `"failed"`, `"full_report"`, or `"stub"`
+</ParamField>
+
+<ParamField path="raw_line" type="string" required>
+  The original line that was parsed (e.g., "Sync Status: ✅ Complete")
+</ParamField>
+
+## Constants
+
+### STATUS_PREFIXES
+
+```typescript
+const STATUS_PREFIXES = ["Sync Status:", "Snapshot Status:", "Report Status:"] as const;
+```
+
+Recognized status line prefixes. The parser searches for lines starting with these strings.
+
+### EMOJI_MAP
+
+```typescript
+const EMOJI_MAP: Record<string, StatusValue> = {
+  "✅": "complete",
+  "⚠️": "partial",
+  "❌": "failed",
+};
+```
+
+Maps status emojis to their corresponding StatusValue.
+
+## Functions
+
+### parseStatusLine
+
+```typescript
+function parseStatusLine(lines: string[]): ParsedStatus | null
+```
+
+Scans the first 10 lines of digest content for a status line (Sync Status, Snapshot Status, or Report Status) and parses the status type and value from the emoji and text.
+
+<ParamField path="lines" type="string[]" required>
+  Array of lines from digest page content (typically from Notion block plain text)
+</ParamField>
+
+<ResponseField name="return" type="ParsedStatus | null">
+  Parsed status object, or `null` if no status line was found
+</ResponseField>
+
+**Parsing rules:**
+
+- Searches first 10 lines only
+- Matches lines starting with "Sync Status:", "Snapshot Status:", or "Report Status:"
+- Status type derived from prefix (Sync → sync, Snapshot → snapshot, Report → report)
+- Status value derived from emoji:
+  - ✅ → `"complete"`
+  - ⚠️ → `"partial"`
+  - ❌ → `"failed"`
+  - Text containing "stub" → `"stub"`
+  - Text containing "full" → `"full_report"`
+
+**Example:**
+
+```typescript
+import { parseStatusLine } from "./shared/status-parser.js";
+
+const lines = [
+  "Email Triage — 2026-03-04",
+  "Run Time: 2026-03-04 08:30 (America/Chicago)",
+  "Sync Status: ✅ Complete",
+  "Scope: Processed 12 emails",
+];
+
+const parsed = parseStatusLine(lines);
+// {
+//   status_type: "sync",
+//   status_value: "complete",
+//   raw_line: "Sync Status: ✅ Complete"
+// }
+```
+
+### parseRunTime
+
+```typescript
+function parseRunTime(lines: string[]): string | null
+```
+
+Searches the first 10 lines for a "Run Time:" line and extracts the timestamp string.
+
+<ParamField path="lines" type="string[]" required>
+  Array of lines from digest page content
+</ParamField>
+
+<ResponseField name="return" type="string | null">
+  Run time string (e.g., "2026-03-04 08:30 (America/Chicago)"), or `null` if not found
+</ResponseField>
+
+**Example:**
+
+```typescript
+import { parseRunTime } from "./shared/status-parser.js";
+
+const lines = [
+  "Email Triage — 2026-03-04",
+  "Run Time: 2026-03-04 08:30 (America/Chicago)",
+  "Sync Status: ✅ Complete",
+];
+
+const runTime = parseRunTime(lines);
+// "2026-03-04 08:30 (America/Chicago)"
+```
+
+### hasHeartbeatLine
+
+```typescript
+function hasHeartbeatLine(lines: string[]): boolean
+```
+
+Checks if content contains the exact heartbeat string "Heartbeat: no actionable items".
+
+<ParamField path="lines" type="string[]" required>
+  Array of lines from digest page content
+</ParamField>
+
+<ResponseField name="return" type="boolean">
+  `true` if heartbeat line is found, `false` otherwise
+</ResponseField>
+
+**Example:**
+
+```typescript
+import { hasHeartbeatLine } from "./shared/status-parser.js";
+
+const heartbeatLines = [
+  "Email Triage — 2026-03-04",
+  "Heartbeat: no actionable items",
+];
+
+hasHeartbeatLine(heartbeatLines); // true
+```
+
+### buildStatusLine
+
+```typescript
+function buildStatusLine(statusType: StatusType, statusValue: StatusValue): string
+```
+
+Generates a formatted status line string for inclusion in digest page content. Used by `write-agent-digest` when creating digest pages.
+
+<ParamField path="statusType" type="StatusType" required>
+  Type of status: `"sync"`, `"snapshot"`, `"report"`, or `"heartbeat"`
+</ParamField>
+
+<ParamField path="statusValue" type="StatusValue" required>
+  Outcome: `"complete"`, `"partial"`, `"failed"`, `"full_report"`, or `"stub"`
+</ParamField>
+
+<ResponseField name="return" type="string">
+  Formatted status line (e.g., "Sync Status: ✅ Complete")
+</ResponseField>
+
+**Formatting rules:**
+
+- Heartbeat always returns "Sync Status: ✅ Complete"
+- Emoji selection:
+  - ✅ for complete or full_report
+  - ⚠️ for partial or stub
+  - ❌ for failed
+- Label based on status type:
+  - sync → "Sync Status"
+  - snapshot → "Snapshot Status"
+  - report → "Report Status"
+- Value text:
+  - sync: "Complete", "Partial", or "Failed"
+  - snapshot: "Complete" or "Partial"
+  - report: "Full report", "Stub", or "Failed"
+
+**Example:**
+
+```typescript
+import { buildStatusLine } from "./shared/status-parser.js";
+
+buildStatusLine("sync", "complete");
+// "Sync Status: ✅ Complete"
+
+buildStatusLine("sync", "partial");
+// "Sync Status: ⚠️ Partial"
+
+buildStatusLine("report", "full_report");
+// "Report Status: ✅ Full report"
+
+buildStatusLine("heartbeat", "complete");
+// "Sync Status: ✅ Complete"
+```
+
+## Usage Example
+
+Complete example of parsing digest content:
+
+```typescript
+import {
+  parseStatusLine,
+  parseRunTime,
+  hasHeartbeatLine,
+} from "./shared/status-parser.js";
+
+// Get page content from Notion
+const blocks = await notion.blocks.children.list({ block_id: pageId });
+const lines = blocks.results
+  .map((b) => {
+    if ("paragraph" in b && b.paragraph.rich_text.length > 0) {
+      return b.paragraph.rich_text[0]?.plain_text ?? "";
+    }
+    return "";
+  })
+  .filter((line) => line.trim());
+
+// Parse status
+const parsed = parseStatusLine(lines);
+if (!parsed) {
+  console.log("No status line found");
+} else {
+  console.log(`Status: ${parsed.status_type} - ${parsed.status_value}`);
+}
+
+// Parse run time
+const runTime = parseRunTime(lines);
+console.log(`Run time: ${runTime}`);
+
+// Check for heartbeat
+const isHeartbeat = hasHeartbeatLine(lines);
+console.log(`Is heartbeat: ${isHeartbeat}`);
+```

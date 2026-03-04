@@ -1,0 +1,188 @@
+---
+title: "Block Builder"
+description: "Notion block builder utilities for digest page content"
+---
+
+## Overview
+
+Utilities for building Notion API block objects from markdown-style content. Used by `write-agent-digest` to convert digest content into Notion blocks.
+
+## Types
+
+### RichTextItem
+
+```typescript
+type RichTextItem = { type: "text"; text: { content: string } };
+```
+
+Basic rich text object for Notion API. This implementation only supports plain text content (no formatting, links, or mentions).
+
+## Internal Functions
+
+These functions are not exported but are used internally by `buildDigestBlocks`:
+
+### paragraph
+
+```typescript
+function paragraph(content: string): {
+  type: "paragraph";
+  paragraph: { rich_text: RichTextItem[] };
+}
+```
+
+Creates a Notion paragraph block.
+
+### heading2
+
+```typescript
+function heading2(content: string): {
+  type: "heading_2";
+  heading_2: { rich_text: RichTextItem[] };
+}
+```
+
+Creates a Notion heading_2 block.
+
+### bulletedListItem
+
+```typescript
+function bulletedListItem(content: string): {
+  type: "bulleted_list_item";
+  bulleted_list_item: { rich_text: RichTextItem[] };
+}
+```
+
+Creates a Notion bulleted_list_item block.
+
+## Exported Functions
+
+### buildDigestBlocks
+
+```typescript
+function buildDigestBlocks(lines: string[]): Array<Record<string, unknown>>
+```
+
+Converts an array of markdown-style text lines into Notion API block objects. Supports headings, bulleted lists, and paragraphs.
+
+<ParamField path="lines" type="string[]" required>
+  Array of content lines in markdown-style format
+</ParamField>
+
+<ResponseField name="return" type="Array<Record<string, unknown>>">
+  Array of Notion block objects ready for `blocks.children.append`
+</ResponseField>
+
+**Parsing rules:**
+
+- Lines starting with `"## "` → heading_2 block (prefix removed)
+- Lines starting with `"- "` → bulleted_list_item block (prefix removed)
+- Non-empty lines → paragraph block
+- Empty lines (after trim) → skipped
+
+**Supported block types:**
+
+- `heading_2` - Level 2 headings
+- `paragraph` - Regular text
+- `bulleted_list_item` - Bullet points
+
+**Limitations:**
+
+- No support for heading_1 or heading_3
+- No support for numbered lists
+- No rich text formatting (bold, italic, code)
+- No links, mentions, or equations
+- No nested lists or indentation
+- Empty lines are discarded
+
+**Example:**
+
+```typescript
+import { buildDigestBlocks } from "./shared/block-builder.js";
+
+const lines = [
+  "Run Time: 2026-03-04 08:30 (America/Chicago)",
+  "Sync Status: ✅ Complete",
+  "",
+  "## Summary",
+  "Processed 12 emails from inbox.",
+  "",
+  "## Flagged Items",
+  "- Urgent client email requires response",
+  "- Meeting invite needs calendar check",
+];
+
+const blocks = buildDigestBlocks(lines);
+// [
+//   { type: "paragraph", paragraph: { rich_text: [{ type: "text", text: { content: "Run Time: 2026-03-04 08:30 (America/Chicago)" } }] } },
+//   { type: "paragraph", paragraph: { rich_text: [{ type: "text", text: { content: "Sync Status: ✅ Complete" } }] } },
+//   { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: "Summary" } }] } },
+//   { type: "paragraph", paragraph: { rich_text: [{ type: "text", text: { content: "Processed 12 emails from inbox." } }] } },
+//   { type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: "Flagged Items" } }] } },
+//   { type: "bulleted_list_item", bulleted_list_item: { rich_text: [{ type: "text", text: { content: "Urgent client email requires response" } }] } },
+//   { type: "bulleted_list_item", bulleted_list_item: { rich_text: [{ type: "text", text: { content: "Meeting invite needs calendar check" } }] } }
+// ]
+```
+
+## Usage with Notion API
+
+```typescript
+import { buildDigestBlocks } from "./shared/block-builder.js";
+import { getNotionClient } from "./shared/notion-client.js";
+
+const notion = getNotionClient();
+
+// Build content
+const lines = [
+  "Run Time: 2026-03-04 08:30 (America/Chicago)",
+  "Sync Status: ✅ Complete",
+  "## Summary",
+  "Successfully processed all items.",
+];
+
+const blocks = buildDigestBlocks(lines);
+
+// Create page with blocks
+const response = await notion.pages.create({
+  parent: { database_id: databaseId },
+  properties: {
+    Name: { title: [{ text: { content: "Email Triage — 2026-03-04" } }] },
+  },
+  children: blocks,
+});
+
+console.log(`Created page: ${response.url}`);
+```
+
+## Alternative: Append Blocks After Page Creation
+
+```typescript
+// Create empty page first
+const page = await notion.pages.create({
+  parent: { database_id: databaseId },
+  properties: {
+    Name: { title: [{ text: { content: "Email Triage — 2026-03-04" } }] },
+  },
+});
+
+// Then append blocks
+const blocks = buildDigestBlocks(lines);
+await notion.blocks.children.append({
+  block_id: page.id,
+  children: blocks,
+});
+```
+
+## Future Enhancements
+
+Potential improvements to the block builder:
+
+- Support for rich text formatting (bold, italic, strikethrough, code)
+- Support for links and mentions
+- Support for numbered lists
+- Support for nested/indented lists
+- Support for callout blocks
+- Support for code blocks with syntax highlighting
+- Support for dividers
+- Support for toggle blocks
+
+For now, the simple implementation covers the digest page use case.

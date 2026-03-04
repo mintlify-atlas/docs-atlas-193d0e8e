@@ -1,0 +1,459 @@
+---
+title: Testing Guide
+description: Comprehensive testing strategy for jre-notion-workers including unit, integration, and coverage testing
+---
+
+## Testing Stack
+
+The project uses modern tooling for fast, reliable testing:
+
+<CardGroup cols={2}>
+  <Card title="Test Runner" icon="play">
+    **Bun test** — Built-in, native TypeScript, no compile step
+  </Card>
+  <Card title="Assertions" icon="check">
+    **Bun expect()** — Jest-compatible API
+  </Card>
+  <Card title="Mocking" icon="mask">
+    **bun:test mock()** — For adapter/client boundaries
+  </Card>
+  <Card title="Type Checking" icon="shield-check">
+    **tsc --noEmit** — Must pass before deployment
+  </Card>
+</CardGroup>
+
+## Test Commands
+
+### Basic Testing
+
+<CodeGroup>
+  ```bash All Tests
+  bun test
+  ```
+
+  ```bash Watch Mode
+  bun test --watch
+  ```
+
+  ```bash Integration Only
+  bun test tests/integration/
+  ```
+
+  ```bash Coverage
+  bun test --coverage
+  ```
+</CodeGroup>
+
+### With Environment Files
+
+<CodeGroup>
+  ```bash .env.local
+  bun run test:local
+  ```
+
+  ```bash 1Password
+  bun run test:1p
+  ```
+
+  ```bash CI Mode
+  bun run test:ci
+  ```
+</CodeGroup>
+
+### Specialized Tests
+
+<CodeGroup>
+  ```bash Connection Test
+  bun run test:connection
+  ```
+
+  ```bash Integration Tests
+  bun run test:integration
+  ```
+
+  ```bash Coverage Report
+  bun run test:coverage
+  ```
+</CodeGroup>
+
+### Type Checking
+
+```bash
+npm run check
+```
+
+<Note>
+Type checking must pass before deployment. The project enforces `strict: true` with no exceptions.
+</Note>
+
+## Test Structure
+
+Tests are organized by type and scope:
+
+```
+tests/
+├── unit/
+│   ├── write-agent-digest.test.ts
+│   ├── write-agent-digest-schema.test.ts
+│   ├── check-upstream-status.test.ts
+│   ├── create-handoff-marker.test.ts
+│   └── shared/
+│       ├── status-parser.test.ts
+│       ├── date-utils.test.ts
+│       └── agent-config.test.ts
+├── integration/
+│   ├── write-agent-digest.integration.test.ts
+│   ├── check-upstream-status.integration.test.ts
+│   └── create-handoff-marker.integration.test.ts
+├── evals/
+│   └── status-lines.eval.ts      # Golden input/output pairs
+└── fixtures/
+    └── mock-inputs.ts            # Shared test data
+```
+
+### File Naming Conventions
+
+| Type | Pattern | Example |
+|------|---------|----------|
+| Unit tests | `*.test.ts` | `status-parser.test.ts` |
+| Integration tests | `*.integration.test.ts` | `write-agent-digest.integration.test.ts` |
+| Eval data | `*.eval.ts` | `status-lines.eval.ts` |
+
+<Note>
+Bun discovers tests by `.test` or `.spec` suffix in the filename.
+</Note>
+
+## Unit Tests — Pure Logic Only
+
+Unit tests focus on shared modules and pure helpers with **no Notion API calls** and **no network access**.
+
+### Example: Status Parser
+
+```typescript
+import { describe, expect, it } from 'bun:test';
+import { parseStatusLine, buildStatusLine } from '../../src/shared/status-parser.js';
+
+describe('parseStatusLine', () => {
+  it('parses sync complete', () => {
+    const result = parseStatusLine(['Sync Status: ✅ Complete', 'Run Time: ...']);
+    expect(result).toMatchObject({ 
+      status_type: 'sync', 
+      status_value: 'complete' 
+    });
+  });
+  
+  it('returns null when no status line in first 10 lines', () => {
+    expect(parseStatusLine(['Just content'])).toBeNull();
+  });
+});
+
+describe('buildStatusLine', () => {
+  it('formats sync complete', () => {
+    expect(buildStatusLine('sync', 'complete')).toBe('Sync Status: ✅ Complete');
+  });
+});
+```
+
+### Example: Worker Helpers
+
+```typescript
+import { buildPageTitle, isHeartbeat, validateFlaggedItems } from '../../src/workers/write-agent-digest.js';
+
+describe('buildPageTitle', () => {
+  it('uses emoji on normal runs', () => {
+    expect(buildPageTitle({ 
+      emoji: '🔄', 
+      digestType: 'GitHub Sync', 
+      date: '2026-02-28', 
+      isError: false 
+    })).toBe('🔄 GitHub Sync — 2026-02-28');
+  });
+  
+  it('drops emoji and adds ERROR on degraded runs', () => {
+    expect(buildPageTitle({ 
+      emoji: '🔄', 
+      digestType: 'GitHub Sync', 
+      date: '2026-02-28', 
+      isError: true 
+    })).toBe('GitHub Sync ERROR — 2026-02-28');
+  });
+});
+```
+
+## Mocking the Notion Client
+
+**Best practice:** Mock at the boundary passed into the worker (the `notion` client object), not Notion SDK internals.
+
+### Creating a Mock Client
+
+```typescript
+import { mock } from 'bun:test';
+
+function createMockNotionClient() {
+  return {
+    pages: {
+      create: mock(async () => ({ 
+        id: 'mock-page-id', 
+        url: 'https://notion.so/mock' 
+      })),
+      retrieve: mock(async () => ({ 
+        id: 'mock', 
+        properties: {} 
+      })),
+    },
+    databases: { 
+      query: mock(async () => ({ 
+        results: [], 
+        has_more: false 
+      })) 
+    },
+    blocks: { 
+      children: { 
+        list: mock(async () => ({ results: [] })), 
+        append: mock(async () => ({})) 
+      } 
+    },
+  };
+}
+```
+
+<Note>
+Use `tests/fixtures/mock-inputs.ts` for shared test data so multiple tests can reuse the same setup.
+</Note>
+
+## Schema Contract Tests
+
+Verify output shapes to catch schema drift early:
+
+```typescript
+describe('write-agent-digest output schema', () => {
+  it('returns required fields on success', async () => {
+    const result = await executeWithMock(validInput);
+    expect(result).toMatchObject({
+      success: true,
+      page_url: expect.any(String),
+      page_id: expect.any(String),
+      is_error_titled: expect.any(Boolean),
+      is_heartbeat: expect.any(Boolean),
+    });
+  });
+  
+  it('returns success:false + error on validation failure', async () => {
+    const result = await executeWithMock({ 
+      ...validInput, 
+      agent_name: 'Invalid' 
+    });
+    expect(result.success).toBe(false);
+    expect(typeof result.error).toBe('string');
+  });
+});
+```
+
+## Integration Tests — Always Guarded
+
+Integration tests call the **real Notion API** and must follow strict safety rules.
+
+### Requirements
+
+<Warning>
+**Critical Rules:**
+- MUST use dedicated test database and token
+- MUST be guarded to skip when test env vars are not set
+- MUST clean up created pages in `afterEach`
+- NEVER touch production databases
+</Warning>
+
+### Environment Variables
+
+Set these in your `.env` or `.env.local`:
+
+```bash
+TEST_NOTION_TOKEN=secret_test_...
+TEST_DOCS_DATABASE_ID=test_db_id...
+```
+
+<Note>
+These must be documented in `.env.example`.
+</Note>
+
+### Example Integration Test
+
+```typescript
+import { describe, it, expect, afterEach } from 'bun:test';
+import { executeWriteAgentDigest } from '../../src/workers/write-agent-digest.js';
+import { getNotionClient } from '../../src/shared/notion-client.js';
+
+const TEST_DB = process.env.TEST_DOCS_DATABASE_ID;
+
+describe.skipIf(!TEST_DB)('write-agent-digest (integration)', () => {
+  const createdPages: string[] = [];
+
+  afterEach(async () => {
+    // Archive created pages
+    const notion = getNotionClient();
+    for (const pageId of createdPages) {
+      await notion.pages.update({ page_id: pageId, archived: true });
+    }
+    createdPages.length = 0;
+  });
+
+  it('creates a page in the test database', async () => {
+    const result = await executeWriteAgentDigest(validInput, getNotionClient());
+    expect(result.success).toBe(true);
+    expect(result.page_url).toContain('notion.so');
+    
+    if (result.success) {
+      createdPages.push(result.page_id);
+    }
+  });
+});
+```
+
+## Eval Sets
+
+For parsing and formatting logic, maintain golden input/output pairs:
+
+```typescript
+// tests/evals/status-lines.eval.ts
+export const STATUS_LINE_EVALS = [
+  [['Sync Status: ✅ Complete'], { status_type: 'sync', status_value: 'complete' }],
+  [['Report Status: ❌ Failed'], { status_type: 'report', status_value: 'failed' }],
+  [['Heartbeat: no actionable items'], null],
+  [[], null],
+] as const;
+```
+
+Then import and loop in unit tests:
+
+```typescript
+import { STATUS_LINE_EVALS } from '../evals/status-lines.eval.js';
+
+describe('status line evals', () => {
+  STATUS_LINE_EVALS.forEach(([input, expected]) => {
+    it(`parses ${JSON.stringify(input)}`, () => {
+      expect(parseStatusLine(input)).toEqual(expected);
+    });
+  });
+});
+```
+
+## Regression Tests
+
+When fixing a bug, add a named regression test:
+
+```typescript
+describe('regression: validateFlaggedItems', () => {
+  it('allows no_task_reason without task_link', () => {
+    const item = { 
+      title: 'Test', 
+      no_task_reason: 'Not urgent' 
+    };
+    expect(() => validateFlaggedItems([item])).not.toThrow();
+  });
+});
+```
+
+## Performance Targets
+
+| Operation | Target | Fail if |
+|-----------|--------|----------|
+| Unit test suite | < 500ms | > 2s |
+| Single Notion call | < 800ms | > 3s |
+| Full worker execute | < 5s | > 15s |
+| Integration suite | < 30s | > 60s |
+
+<Note>
+Use `bun test --timeout 10000` in CI if needed.
+</Note>
+
+## CI Checklist
+
+Before merging or deploying:
+
+<Steps>
+  <Step title="Run all tests">
+    ```bash
+    bun test
+    ```
+    Must pass with zero failures.
+  </Step>
+
+  <Step title="Type check">
+    ```bash
+    npm run check
+    ```
+    Must exit with no errors.
+  </Step>
+
+  <Step title="Verify type safety">
+    - No new `any` types
+    - Strict TypeScript preserved
+    - No non-null assertions on API responses
+  </Step>
+
+  <Step title="Check schema contracts">
+    Schema contract tests cover both success and validation-failure output shapes.
+  </Step>
+
+  <Step title="Verify integration guards">
+    Integration tests use `describe.skipIf` and do not touch production DBs.
+  </Step>
+
+  <Step title="Ensure regression coverage">
+    Regression test added for any bug fix.
+  </Step>
+
+  <Step title="Document test variables">
+    `TEST_NOTION_TOKEN` and `TEST_DOCS_DATABASE_ID` documented in `.env.example`.
+  </Step>
+</Steps>
+
+## Coverage Reporting
+
+Generate coverage reports with:
+
+```bash
+bun test --coverage
+```
+
+Coverage is displayed in the terminal. Focus on:
+
+- **Shared modules** — Should have high coverage (>80%)
+- **Pure helpers** — Should approach 100%
+- **Workers** — Integration tests provide coverage for orchestration
+
+<Warning>
+Don't chase 100% coverage at the expense of meaningful tests. Focus on testing critical paths and edge cases.
+</Warning>
+
+## Available Test Scripts
+
+All test scripts from `package.json`:
+
+| Script | Command | Purpose |
+|--------|---------|----------|
+| `test` | `bun test` | Run all tests |
+| `test:local` | `bun test --env-file=.env.local` | Tests with .env.local |
+| `test:ci` | `bun test --timeout 10000` | CI mode with timeout |
+| `test:1p` | `op run --env-file=.env.1p -- bun test` | Tests with 1Password |
+| `test:connection` | `bun run scripts/test-connection.ts` | Verify Notion credentials |
+| `test:connection:1p` | `op run --env-file=.env.1p -- bun run scripts/test-connection.ts` | Connection test with 1Password |
+| `test:integration` | `bun test tests/integration/` | Integration tests only |
+| `test:coverage` | `bun test --coverage` | Coverage report |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Setup Guide" icon="wrench" href="/guides/setup">
+    Complete local development setup
+  </Card>
+  <Card title="Credentials" icon="key" href="/guides/credentials">
+    Configure test environment variables
+  </Card>
+  <Card title="Deployment" icon="rocket" href="/guides/deployment">
+    Deploy after tests pass
+  </Card>
+  <Card title="Architecture" icon="diagram-project" href="/concepts/architecture">
+    Understand the system design
+  </Card>
+</CardGroup>

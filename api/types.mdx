@@ -1,0 +1,204 @@
+---
+title: "Core Types and Enums"
+description: "Shared type definitions and enums for all Notion Workers"
+---
+
+## Overview
+
+Core TypeScript types and enums used across all three workers: `write-agent-digest`, `check-upstream-status`, and `create-handoff-marker`.
+
+## Enums
+
+### StatusType
+
+```typescript
+type StatusType = "sync" | "snapshot" | "report" | "heartbeat";
+```
+
+Defines the type of status being reported by an agent.
+
+- `sync` - Synchronization operation (e.g., syncing emails, GitHub issues)
+- `snapshot` - Point-in-time snapshot (e.g., audit results)
+- `report` - Generated report (e.g., weekly activity)
+- `heartbeat` - No-op status indicating the agent ran but found no work
+
+### StatusValue
+
+```typescript
+type StatusValue = "complete" | "partial" | "failed" | "full_report" | "stub";
+```
+
+The outcome of an agent's execution.
+
+- `complete` - Operation completed successfully
+- `partial` - Operation completed with some items skipped or incomplete
+- `failed` - Operation failed
+- `full_report` - Full detailed report generated (report-type agents)
+- `stub` - Minimal stub report (report-type agents)
+
+### TargetDatabase
+
+```typescript
+type TargetDatabase = "docs" | "home_docs";
+```
+
+Which Notion database to write digest pages to.
+
+- `docs` - Professional/work-related digests (DOCS_DATABASE_ID)
+- `home_docs` - Personal/home-related digests (HOME_DOCS_DATABASE_ID)
+
+### TaskPriority
+
+```typescript
+type TaskPriority = "🔴 High" | "🟡 Medium" | "🟢 Low";
+```
+
+Priority level for tasks created during handoffs.
+
+### UpstreamStatus
+
+```typescript
+type UpstreamStatus =
+  | "complete"
+  | "partial"
+  | "failed"
+  | "full_report"
+  | "stub"
+  | "not_found"
+  | "stale"
+  | "unknown";
+```
+
+Extended status enumeration used by `check-upstream-status` worker.
+
+- `complete`, `partial`, `failed`, `full_report`, `stub` - Same as StatusValue
+- `not_found` - No digest page found for the agent
+- `stale` - Digest found but older than max_age_hours
+- `unknown` - Could not determine status from page content
+
+## Shared Interfaces
+
+### FlaggedItem
+
+```typescript
+interface FlaggedItem {
+  description: string;
+  task_link?: string;
+  no_task_reason?: string;
+}
+```
+
+Represents an issue or item that requires attention.
+
+<ParamField path="description" type="string" required>
+  Human-readable description of the flagged item
+</ParamField>
+
+<ParamField path="task_link" type="string">
+  URL to a Notion task page if one was created for this item
+</ParamField>
+
+<ParamField path="no_task_reason" type="string">
+  Explanation for why no task was created (e.g., "Already has open task")
+</ParamField>
+
+### TaskRef
+
+```typescript
+interface TaskRef {
+  name: string;
+  notion_url: string;
+}
+```
+
+Reference to a Notion task page.
+
+<ParamField path="name" type="string" required>
+  Task title/name
+</ParamField>
+
+<ParamField path="notion_url" type="string" required>
+  Full Notion URL to the task page
+</ParamField>
+
+### ActionsTaken
+
+```typescript
+interface ActionsTaken {
+  created_tasks: TaskRef[];
+  updated_tasks: TaskRef[];
+}
+```
+
+Summary of tasks created or updated during agent execution.
+
+<ParamField path="created_tasks" type="TaskRef[]" required>
+  Array of newly created tasks
+</ParamField>
+
+<ParamField path="updated_tasks" type="TaskRef[]" required>
+  Array of existing tasks that were updated
+</ParamField>
+
+### NeedsReview
+
+```typescript
+interface NeedsReview {
+  description: string;
+}
+```
+
+Item that requires human review but doesn't warrant escalation.
+
+<ParamField path="description" type="string" required>
+  Description of what needs review
+</ParamField>
+
+### Escalation
+
+```typescript
+interface Escalation {
+  escalated_to: string;
+  escalation_reason: string;
+  escalation_owner: string;
+  handoff_complete: boolean;
+}
+```
+
+Represents an escalation to another agent or human.
+
+<ParamField path="escalated_to" type="string" required>
+  Name of agent or person receiving the escalation
+</ParamField>
+
+<ParamField path="escalation_reason" type="string" required>
+  Why this item was escalated
+</ParamField>
+
+<ParamField path="escalation_owner" type="string" required>
+  Who owns the escalation (typically the source agent name)
+</ParamField>
+
+<ParamField path="handoff_complete" type="boolean" required>
+  Whether the handoff has been completed
+</ParamField>
+
+## Example Usage
+
+```typescript
+import type { StatusType, StatusValue, FlaggedItem } from "./shared/types.js";
+
+const statusType: StatusType = "sync";
+const statusValue: StatusValue = "complete";
+
+const flaggedItems: FlaggedItem[] = [
+  {
+    description: "Email from client with urgent question",
+    task_link: "https://notion.so/...",
+  },
+  {
+    description: "Spam email caught in filter",
+    no_task_reason: "Spam - no action needed",
+  },
+];
+```

@@ -1,0 +1,500 @@
+---
+title: Deployment Guide
+description: Deploy jre-notion-workers to production using the ntn CLI
+---
+
+## Overview
+
+Notion Workers are deployed to **Notion's infrastructure** via the `ntn` CLI. Workers:
+
+- Run on **Node.js ≥ 22** (managed by Notion)
+- Execute on-demand (not long-running servers)
+- Receive JSON input and return JSON output
+- Have access to a pre-authenticated Notion client
+
+<Note>
+Notion Workers is currently in **alpha**. APIs and deployment behavior may change. Check [makenotion/workers-template](https://github.com/makenotion/workers-template) for the latest updates.
+</Note>
+
+## Prerequisites
+
+<Steps>
+  <Step title="Install ntn CLI">
+    Follow the installation guide at [makenotion/workers-template](https://github.com/makenotion/workers-template).
+  </Step>
+
+  <Step title="Authenticate">
+    Ensure you're authenticated with the ntn CLI:
+    
+    ```bash
+    ntn auth login
+    ```
+  </Step>
+
+  <Step title="Verify local setup">
+    Run tests and type checking:
+
+    <CodeGroup>
+      ```bash Run Tests
+      bun test
+      ```
+
+      ```bash Type Check
+      npm run check
+      ```
+    </CodeGroup>
+
+    Both must pass before deployment.
+  </Step>
+</Steps>
+
+## Deployment Process
+
+### Quick Deploy
+
+The fastest way to deploy:
+
+```bash
+npm run deploy
+```
+
+This runs `npm run build && ntn workers deploy` automatically.
+
+### Manual Deploy
+
+<Steps>
+  <Step title="Build">
+    Compile TypeScript:
+
+    ```bash
+    npm run build
+    ```
+
+    This runs `tsc` and must complete with zero errors.
+  </Step>
+
+  <Step title="Deploy">
+    Deploy workers to production:
+
+    ```bash
+    ntn workers deploy
+    ```
+
+    The CLI will:
+    - Package your workers
+    - Upload to Notion's infrastructure
+    - Register the tools
+    - Confirm deployment success
+  </Step>
+
+  <Step title="Verify">
+    List deployed workers:
+
+    ```bash
+    ntn workers list
+    ```
+
+    You should see:
+    - `write-agent-digest`
+    - `check-upstream-status`
+    - `create-handoff-marker`
+  </Step>
+</Steps>
+
+## Setting Production Secrets
+
+Before first deployment, configure production secrets:
+
+<CodeGroup>
+  ```bash Interactive Mode
+  ntn workers secrets set NOTION_TOKEN
+  ntn workers secrets set DOCS_DATABASE_ID
+  ntn workers secrets set HOME_DOCS_DATABASE_ID
+  ntn workers secrets set TASKS_DATABASE_ID
+  ```
+
+  ```bash With Values
+  ntn workers secrets set NOTION_TOKEN=secret_abc123...
+  ntn workers secrets set DOCS_DATABASE_ID=abc123...
+  ntn workers secrets set HOME_DOCS_DATABASE_ID=def456...
+  ntn workers secrets set TASKS_DATABASE_ID=ghi789...
+  ```
+</CodeGroup>
+
+<Warning>
+Use production credentials, not test credentials. Never commit secrets or share them in logs.
+</Warning>
+
+### List Configured Secrets
+
+```bash
+ntn workers secrets list
+```
+
+### Update a Secret
+
+```bash
+ntn workers secrets set NOTION_TOKEN=new_token_value
+```
+
+<Note>
+Updating a secret requires redeployment for the change to take effect.
+</Note>
+
+## Testing Deployed Workers
+
+### Invoke a Worker
+
+Test a deployed worker with sample input:
+
+```bash
+ntn workers invoke write-agent-digest --input '{
+  "agent_name": "Inbox Manager",
+  "run_timestamp": "2026-03-04T10:30:00Z",
+  "status_type": "sync",
+  "status_value": "complete",
+  "sections": [
+    {
+      "heading": "Summary",
+      "content": ["Processed 5 emails"]
+    }
+  ]
+}'
+```
+
+### View Logs
+
+Monitor worker execution:
+
+```bash
+ntn workers logs
+```
+
+Filter by worker name:
+
+```bash
+ntn workers logs --worker write-agent-digest
+```
+
+<Accordion title="Log Retention">
+  Check the [makenotion/workers-template](https://github.com/makenotion/workers-template) documentation for current log retention policies.
+</Accordion>
+
+## Deployment Checklist
+
+Before deploying to production:
+
+<Steps>
+  <Step title="Tests Pass">
+    <CodeGroup>
+      ```bash Unit Tests
+      bun test
+      ```
+
+      ```bash Integration Tests
+      bun test tests/integration/
+      ```
+    </CodeGroup>
+
+    All tests must pass with zero failures.
+  </Step>
+
+  <Step title="Type Check Passes">
+    ```bash
+    npm run check
+    ```
+
+    Must exit with no errors. `strict: true` is enforced.
+  </Step>
+
+  <Step title="Build Succeeds">
+    ```bash
+    npm run build
+    ```
+
+    TypeScript compilation must complete successfully.
+  </Step>
+
+  <Step title="Secrets Configured">
+    ```bash
+    ntn workers secrets list
+    ```
+
+    Verify all required secrets are set:
+    - `NOTION_TOKEN`
+    - `DOCS_DATABASE_ID`
+    - `HOME_DOCS_DATABASE_ID`
+    - `TASKS_DATABASE_ID`
+  </Step>
+
+  <Step title="README Updated">
+    Ensure the README documents:
+    - Input/output schemas for each worker
+    - When agents should call each worker
+    - Any new features or breaking changes
+  </Step>
+</Steps>
+
+## Worker Platform Constraints
+
+### Runtime Environment
+
+<CardGroup cols={2}>
+  <Card title="Node.js ≥ 22" icon="node-js">
+    Managed by Notion's infrastructure
+  </Card>
+  <Card title="No Bun APIs" icon="ban">
+    `Bun.file()`, `Bun.serve()`, etc. won't exist
+  </Card>
+  <Card title="ESM Only" icon="cube">
+    `"type": "module"` in package.json
+  </Card>
+  <Card title="TypeScript" icon="shield-check">
+    Compiled to JavaScript before deployment
+  </Card>
+</CardGroup>
+
+### Execution Limits
+
+<Warning>
+**Timeout:** Workers must complete within the platform timeout (typically 30-60 seconds). For large datasets, process in batches.
+</Warning>
+
+<Accordion title="Design for Timeout Constraints">
+  - Break large operations into smaller chunks
+  - Return progress indicators if needed
+  - Consider pagination for database queries
+  - Use early returns for validation failures
+</Accordion>
+
+### Input/Output Constraints
+
+- **JSON only** — No `Date` objects, `Map`, `Set`, etc.
+- **Structured responses** — Always return `{ success, ... }` shape
+- **No throwing** — Return `{ success: false, error }` instead
+- **No raw Notion objects** — Map to your own types
+
+## Worker Design Rules
+
+### 1. Atomic Operations Only
+
+One tool = one concern.
+
+**Good:**
+- `write-agent-digest` — Creates one digest page
+- `check-upstream-status` — Checks one agent's status
+- `create-handoff-marker` — Creates one handoff record
+
+**Bad:**
+- A single worker that writes digests AND creates handoffs
+
+### 2. Idempotent by Default
+
+Same input twice should produce the same result or safely skip.
+
+**Example:** `create-handoff-marker` has a circuit breaker — no duplicate handoff within 7 days.
+
+### 3. No Side Effects on Dry Run
+
+If a future worker supports `dryRun: true`, it must not write to Notion.
+
+### 4. Structured Return Values
+
+Always return typed objects:
+
+```typescript
+// Good
+return { 
+  success: true, 
+  page_id: 'abc123', 
+  page_url: 'https://...' 
+};
+
+// Bad
+return 'abc123';
+```
+
+### 5. Timeout-Aware Processing
+
+For large datasets:
+- Process in batches
+- Return progress indicators
+- Consider pagination
+
+## Common Issues
+
+<AccordionGroup>
+  <Accordion title="Build fails with type errors">
+    **Solution:**
+    1. Run `npm run check` locally
+    2. Fix all TypeScript errors
+    3. Ensure `strict: true` is maintained
+    4. Rebuild with `npm run build`
+  </Accordion>
+
+  <Accordion title="Worker times out in production">
+    **Solutions:**
+    - Profile execution time locally
+    - Break operations into smaller batches
+    - Optimize Notion API calls (fewer queries)
+    - Check for infinite loops or blocking operations
+  </Accordion>
+
+  <Accordion title="Secrets not found at runtime">
+    **Solutions:**
+    1. Verify secrets are set: `ntn workers secrets list`
+    2. Check secret names match exactly (case-sensitive)
+    3. Redeploy after updating secrets
+    4. Use `src/shared/notion-client.ts` to read from `process.env`
+  </Accordion>
+
+  <Accordion title="Worker invocation fails with schema error">
+    **Solutions:**
+    - Validate input matches the tool's JSON schema
+    - Check for invalid types (Date objects, etc.)
+    - Review input in `.examples/` directory
+    - Test locally with the exact input first
+  </Accordion>
+</AccordionGroup>
+
+## Monitoring & Debugging
+
+### View Recent Logs
+
+```bash
+ntn workers logs --tail 100
+```
+
+### Debug a Specific Invocation
+
+<Steps>
+  <Step title="Invoke with verbose output">
+    ```bash
+    ntn workers invoke write-agent-digest --input @input.json --verbose
+    ```
+  </Step>
+
+  <Step title="Check logs immediately">
+    ```bash
+    ntn workers logs --worker write-agent-digest --tail 50
+    ```
+  </Step>
+
+  <Step title="Reproduce locally">
+    Use the same input with local dev:
+
+    ```bash
+    bun run dev
+    # Then test with the same input
+    ```
+  </Step>
+</Steps>
+
+### Error Handling Pattern
+
+Workers return errors in the response:
+
+```typescript
+if (!isValidInput(input)) {
+  return { 
+    success: false, 
+    error: 'Invalid agent_name: must be one of ...' 
+  };
+}
+
+try {
+  // Notion API call
+} catch (err) {
+  return { 
+    success: false, 
+    error: `Notion API error: ${err.message}` 
+  };
+}
+```
+
+<Warning>
+Never throw errors to the caller. Always return structured error responses.
+</Warning>
+
+## Rollback & Recovery
+
+<Accordion title="Rollback to Previous Version">
+  The ntn CLI may support version history. Check current documentation:
+
+  ```bash
+  ntn workers versions
+  ntn workers rollback --version <version-id>
+  ```
+
+  Verify in [makenotion/workers-template](https://github.com/makenotion/workers-template).
+</Accordion>
+
+<Accordion title="Emergency Shutdown">
+  If a worker is causing issues:
+
+  1. **Quick fix:** Deploy a version that returns early with a maintenance message
+  2. **Long-term:** Fix the issue, test thoroughly, redeploy
+  3. **Monitor:** Watch logs after redeployment
+</Accordion>
+
+## CI/CD Integration
+
+For automated deployments:
+
+```yaml
+# Example GitHub Actions workflow
+name: Deploy Workers
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '22'
+      
+      - name: Install dependencies
+        run: npm install
+      
+      - name: Run tests
+        run: npm run test:ci
+      
+      - name: Type check
+        run: npm run check
+      
+      - name: Build
+        run: npm run build
+      
+      - name: Deploy
+        env:
+          NTN_TOKEN: ${{ secrets.NTN_TOKEN }}
+        run: ntn workers deploy
+```
+
+<Note>
+Store `NTN_TOKEN` and other credentials in your CI secrets, never in code.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="diagram-project" href="/concepts/architecture">
+    Understand the worker system design
+  </Card>
+  <Card title="Worker Reference" icon="book" href="/workers/write-agent-digest">
+    Detailed API documentation for each worker
+  </Card>
+  <Card title="Testing Guide" icon="flask" href="/guides/testing">
+    Test before deploying
+  </Card>
+  <Card title="Credentials" icon="key" href="/guides/credentials">
+    Manage production secrets
+  </Card>
+</CardGroup>

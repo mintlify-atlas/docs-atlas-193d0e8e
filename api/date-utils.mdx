@@ -1,0 +1,226 @@
+---
+title: "Date Utilities"
+description: "Date formatting and calculation utilities for America/Chicago timezone"
+---
+
+## Overview
+
+Date formatting and calculation utilities, all operating in the America/Chicago timezone. Used for formatting run times in digest pages and calculating data staleness.
+
+## Dependencies
+
+These utilities use the `date-fns` library:
+
+```typescript
+import { addDays, differenceInHours, parseISO } from "date-fns";
+```
+
+## Constants
+
+### CHICAGO
+
+```typescript
+const CHICAGO = "America/Chicago";
+```
+
+IANA timezone identifier for Chicago. Used for all date formatting operations.
+
+## Functions
+
+### formatRunTime
+
+```typescript
+function formatRunTime(isoDate: string): string
+```
+
+Formats an ISO 8601 datetime string to the format `"YYYY-MM-DD HH:mm (America/Chicago)"` in Chicago timezone.
+
+<ParamField path="isoDate" type="string" required>
+  ISO 8601 datetime string (e.g., "2026-03-04T08:30:00Z")
+</ParamField>
+
+<ResponseField name="return" type="string">
+  Formatted datetime string in Chicago time, or the original input if parsing fails
+</ResponseField>
+
+**Example:**
+
+```typescript
+import { formatRunTime } from "./shared/date-utils.js";
+
+formatRunTime("2026-03-04T14:30:00Z");
+// "2026-03-04 08:30 (America/Chicago)"
+
+formatRunTime("invalid");
+// "invalid" (returns input on error)
+```
+
+**Implementation notes:**
+
+- Uses `Intl.DateTimeFormat` with `timeZone: "America/Chicago"`
+- 24-hour time format (hour12: false)
+- Returns original input string if parsing fails (no throw)
+
+### hoursAgo
+
+```typescript
+function hoursAgo(isoDate: string): number
+```
+
+Calculates how many hours have elapsed since the given ISO datetime.
+
+<ParamField path="isoDate" type="string" required>
+  ISO 8601 datetime string
+</ParamField>
+
+<ResponseField name="return" type="number">
+  Number of hours elapsed, or `Number.POSITIVE_INFINITY` if parsing fails
+</ResponseField>
+
+**Example:**
+
+```typescript
+import { hoursAgo } from "./shared/date-utils.js";
+
+// Assuming current time is 2026-03-04 10:30:00Z
+hoursAgo("2026-03-04T08:30:00Z");
+// 2
+
+hoursAgo("2026-03-03T08:30:00Z");
+// 26
+
+hoursAgo("invalid");
+// Infinity
+```
+
+**Use case:**
+
+Used by `check-upstream-status` to determine if a digest page is stale:
+
+```typescript
+const age = hoursAgo(runTimeIso);
+const isStale = age > maxAgeHours;
+```
+
+### nextBusinessDay
+
+```typescript
+function nextBusinessDay(from?: Date): Date
+```
+
+Returns the next business day (Monday–Friday), skipping weekends. If the next day falls on Saturday, returns Monday. If it falls on Sunday, returns Monday.
+
+<ParamField path="from" type="Date">
+  Starting date (defaults to today if omitted)
+</ParamField>
+
+<ResponseField name="return" type="Date">
+  Next business day (always Mon–Fri)
+</ResponseField>
+
+**Example:**
+
+```typescript
+import { nextBusinessDay } from "./shared/date-utils.js";
+
+// If today is Friday, March 7, 2026
+nextBusinessDay();
+// Returns Saturday, March 8 → adjusted to Monday, March 10
+
+// If today is Thursday, March 6, 2026
+nextBusinessDay();
+// Returns Friday, March 7
+
+const friday = new Date("2026-03-06");
+nextBusinessDay(friday);
+// Returns Monday, March 9 (skips Sat/Sun)
+```
+
+**Logic:**
+
+1. Add 1 day to the base date
+2. If result is Sunday (day 0), add 1 more day
+3. If result is Saturday (day 6), add 2 more days
+4. Return the adjusted date
+
+### parseRunTimeString
+
+```typescript
+function parseRunTimeString(runTimeStr: string): Date | null
+```
+
+Parses a run time string in the format `"YYYY-MM-DD HH:mm (America/Chicago)"` (or similar) back to a Date object for age calculation. Assumes Chicago timezone offset of -06:00 (CST).
+
+<ParamField path="runTimeStr" type="string" required>
+  Run time string (e.g., "2026-03-04 08:30 (America/Chicago)")
+</ParamField>
+
+<ResponseField name="return" type="Date | null">
+  Parsed Date object, or `null` if parsing fails
+</ResponseField>
+
+**Example:**
+
+```typescript
+import { parseRunTimeString } from "./shared/date-utils.js";
+
+parseRunTimeString("2026-03-04 08:30 (America/Chicago)");
+// Date object representing 2026-03-04T14:30:00.000Z (UTC)
+
+parseRunTimeString("2026-03-04 8:30 (America/Chicago)");
+// Also works (single-digit hour is padded)
+
+parseRunTimeString("invalid format");
+// null
+```
+
+**Implementation notes:**
+
+- Uses regex to extract date/time components: `/(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{2})/`
+- Pads single-digit hours to two digits
+- Constructs ISO string with -06:00 offset: `"YYYY-MM-DDTHH:mm:00-06:00"`
+- Returns `null` on any parsing error (no throw)
+- Does NOT account for daylight saving time (always uses CST offset)
+
+## Complete Usage Example
+
+```typescript
+import {
+  formatRunTime,
+  hoursAgo,
+  nextBusinessDay,
+  parseRunTimeString,
+} from "./shared/date-utils.js";
+
+// Format current time for digest
+const now = new Date().toISOString();
+const formatted = formatRunTime(now);
+console.log(`Run Time: ${formatted}`);
+// "Run Time: 2026-03-04 08:30 (America/Chicago)"
+
+// Check if digest is stale
+const digestRunTime = "2026-03-03T14:30:00Z";
+const age = hoursAgo(digestRunTime);
+if (age > 24) {
+  console.log(`Digest is ${age} hours old - STALE`);
+}
+
+// Calculate next business day for scheduling
+const nextRun = nextBusinessDay();
+console.log(`Next scheduled run: ${nextRun.toISOString()}`);
+
+// Parse run time from digest content
+const runTimeStr = "2026-03-04 08:30 (America/Chicago)";
+const parsed = parseRunTimeString(runTimeStr);
+if (parsed) {
+  const ageInHours = hoursAgo(parsed.toISOString());
+  console.log(`Digest age: ${ageInHours} hours`);
+}
+```
+
+## Timezone Considerations
+
+- All formatting uses `America/Chicago` timezone
+- `parseRunTimeString` assumes CST offset (-06:00) and does NOT handle DST
+- For precise DST handling, consider using a full timezone library like `date-fns-tz`
+- These utilities are designed for internal digest timestamps and staleness checks, not for user-facing scheduling

@@ -1,97 +1,168 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "jre-notion-workers"
+mode: "custom"
 ---
 
-## Setting up
+<div className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 dark:from-[#0a0d14] dark:via-[#0f1117] dark:to-[#0a0d14] py-20 px-4 sm:px-6 lg:px-8">
+  <div className="max-w-7xl mx-auto">
+    <div className="grid lg:grid-cols-12 gap-8 items-center">
+      <div className="lg:col-span-7">
+        <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-white mb-6">
+          Governance-compliant Notion Workers for agent automation
+        </h1>
+        <p className="text-base sm:text-lg text-gray-300 dark:text-gray-400 max-w-2xl mb-8">
+          TypeScript SDK providing three specialized workers that enforce governance rules, reduce agent overhead, and enable reliable machine-to-machine coordination across an 11-agent automation system.
+        </p>
+        <div className="flex flex-wrap gap-4">
+          <a 
+            href="/quickstart" 
+            className="inline-flex items-center px-6 py-3 rounded-lg bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white font-semibold transition-colors no-underline"
+          >
+            Get started
+          </a>
+          <a 
+            href="/workers/write-agent-digest" 
+            className="inline-flex items-center px-6 py-3 rounded-lg border border-white/30 bg-white/10 hover:bg-white/20 dark:border-gray-600 dark:bg-gray-800 dark:hover:bg-gray-700 text-white font-semibold transition-colors no-underline"
+          >
+            Explore workers
+          </a>
+        </div>
+      </div>
+      <div className="lg:col-span-5 hidden lg:block">
+        <div className="bg-slate-800/50 dark:bg-[#1a1d27] rounded-2xl p-6 border border-slate-700 dark:border-[#27272a]">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-3 h-3 rounded-full bg-red-500"></div>
+            <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+            <div className="w-3 h-3 rounded-full bg-green-500"></div>
+          </div>
+          <pre className="text-sm text-gray-300 dark:text-gray-400 overflow-x-auto">
+{`import { Worker } from "@notionhq/workers";
 
-Get your documentation site up and running in minutes.
+const worker = new Worker();
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
+worker.tool("write-agent-digest", {
+  title: "Write Agent Digest",
+  schema: writeDigestSchema,
+  execute: executeWriteAgentDigest
+});`}
+          </pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
-## Make it yours
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 dark:text-white mb-4">
+    Quick start
+  </h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">
+    Get up and running with jre-notion-workers in minutes
+  </p>
+  
+  <Steps>
+    <Step title="Install the package">
+      Install jre-notion-workers using your preferred package manager:
+      
+      <CodeGroup>
+      ```bash npm
+      npm install jre-notion-workers
+      ```
+      ```bash bun
+      bun install jre-notion-workers
+      ```
+      </CodeGroup>
+    </Step>
+    
+    <Step title="Configure credentials">
+      Set up your Notion integration credentials:
+      
+      ```bash
+      export NOTION_TOKEN=your_notion_token
+      export DOCS_DATABASE_ID=your_docs_database_id
+      export HOME_DOCS_DATABASE_ID=your_home_docs_database_id
+      export TASKS_DATABASE_ID=your_tasks_database_id
+      ```
+    </Step>
+    
+    <Step title="Register your first worker">
+      Import and register a worker in your application:
+      
+      ```typescript
+      import { Worker } from "@notionhq/workers";
+      import { executeWriteAgentDigest } from "./workers/write-agent-digest.js";
+      
+      const worker = new Worker();
+      
+      worker.tool("write-agent-digest", {
+        title: "Write Agent Digest",
+        description: "Creates a governance-compliant agent digest page",
+        schema: writeDigestSchema,
+        execute: executeWriteAgentDigest
+      });
+      ```
+    </Step>
+  </Steps>
+</div>
 
-Design a docs site that looks great and empowers your users.
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 dark:text-white mb-4">
+    Three specialized workers
+  </h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">
+    Each worker handles a specific governance function for agent coordination
+  </p>
+  
+  <CardGroup cols={3}>
+    <Card title="write-agent-digest" icon="file-pen" href="/workers/write-agent-digest">
+      Creates schema-compliant digest pages with automatic formatting, status lines, and governance validation
+    </Card>
+    <Card title="check-upstream-status" icon="magnifying-glass-chart" href="/workers/check-upstream-status">
+      Finds and parses the most recent digest for any agent, with staleness detection and structured status
+    </Card>
+    <Card title="create-handoff-marker" icon="handshake" href="/workers/create-handoff-marker">
+      Manages agent escalations with circuit breakers, escalation caps, and optional task creation
+    </Card>
+  </CardGroup>
+</div>
 
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
-  </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
-  </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
-  </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
-  </Card>
-</Columns>
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 dark:text-white mb-4">
+    Explore by topic
+  </h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">
+    Deep dive into architecture, concepts, and API reference
+  </p>
+  
+  <CardGroup cols={2}>
+    <Card title="Architecture" icon="diagram-project" href="/concepts/architecture">
+      Learn about the layered structure and data flow patterns
+    </Card>
+    <Card title="Agent system" icon="robot" href="/concepts/agent-system">
+      Understand the 11-agent automation system and coordination model
+    </Card>
+    <Card title="Type reference" icon="code" href="/api/types">
+      Explore all TypeScript types and interfaces
+    </Card>
+    <Card title="Testing guide" icon="flask" href="/guides/testing">
+      Run unit, integration, and evaluation tests
+    </Card>
+  </CardGroup>
+</div>
 
-## Create beautiful pages
-
-Everything you need to create world-class documentation.
-
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
-
-## Need inspiration?
-
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="bg-gradient-to-r from-blue-600 to-blue-700 dark:from-blue-900/50 dark:to-blue-800/50 rounded-2xl p-8 border border-blue-500/20 dark:border-blue-700">
+    <h2 className="text-2xl font-semibold text-white mb-3">
+      Ready to enforce governance in your agent system?
+    </h2>
+    <p className="text-blue-100 dark:text-blue-200 mb-6 max-w-2xl">
+      Start using jre-notion-workers to reduce agent overhead and make machine-to-machine coordination reliable.
+    </p>
+    <a 
+      href="/installation" 
+      className="inline-flex items-center px-6 py-3 rounded-lg bg-white hover:bg-gray-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-blue-600 dark:text-blue-400 font-semibold transition-colors no-underline"
+    >
+      Get started →
+    </a>
+  </div>
+</div>

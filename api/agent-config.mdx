@@ -1,0 +1,174 @@
+---
+title: "Agent Configuration"
+description: "Agent name validation and digest pattern utilities"
+---
+
+## Overview
+
+Utilities for mapping agent names to their digest title patterns and target databases. Used by `check-upstream-status` to find digest pages and by `write-agent-digest` to determine the target database.
+
+## Constants
+
+### AGENT_DIGEST_PATTERNS
+
+```typescript
+const AGENT_DIGEST_PATTERNS: Record<string, string[]>
+```
+
+Maps each agent name to an array of possible digest title patterns. Used when searching for digest pages in Notion.
+
+**Value:**
+
+```typescript
+{
+  "Inbox Manager": ["Email Triage"],
+  "Personal Ops Manager": ["Personal Triage"],
+  "GitHub Insyncerator": ["GitHub Sync"],
+  "Client Repo Auditor": ["Client Repo Audit"],
+  "Docs Librarian": ["Docs Quick Scan", "Docs Cleanup Report"],
+  "VEP Weekly Reporter": ["VEP Weekly Activity Report"],
+  "Home & Life Watcher": ["Home & Life Weekly Digest"],
+  "Template Freshness Watcher": ["Setup Template Freshness Report"],
+  "Time Log Auditor": ["Time Log Audit"],
+  "Client Health Scorecard": ["Client Health Scorecard"],
+  "Morning Briefing": ["Morning Briefing"],
+}
+```
+
+Note that some agents produce multiple digest types (e.g., Docs Librarian can create both "Docs Quick Scan" and "Docs Cleanup Report" pages).
+
+### AGENT_TARGET_DB
+
+```typescript
+const AGENT_TARGET_DB: Record<string, TargetDatabase>
+```
+
+Maps each agent name to its target database: `"docs"` (professional) or `"home_docs"` (personal).
+
+**Value:**
+
+```typescript
+{
+  "Inbox Manager": "docs",
+  "Personal Ops Manager": "home_docs",
+  "GitHub Insyncerator": "docs",
+  "Client Repo Auditor": "docs",
+  "Docs Librarian": "docs",
+  "VEP Weekly Reporter": "docs",
+  "Home & Life Watcher": "home_docs",
+  "Template Freshness Watcher": "docs",
+  "Time Log Auditor": "docs",
+  "Client Health Scorecard": "docs",
+  "Morning Briefing": "docs",
+}
+```
+
+### VALID_AGENT_NAMES
+
+```typescript
+const VALID_AGENT_NAMES: string[]
+```
+
+Array of all valid agent names. Derived from `Object.keys(AGENT_DIGEST_PATTERNS)`.
+
+**Value:**
+
+```typescript
+[
+  "Inbox Manager",
+  "Personal Ops Manager",
+  "GitHub Insyncerator",
+  "Client Repo Auditor",
+  "Docs Librarian",
+  "VEP Weekly Reporter",
+  "Home & Life Watcher",
+  "Template Freshness Watcher",
+  "Time Log Auditor",
+  "Client Health Scorecard",
+  "Morning Briefing",
+]
+```
+
+## Functions
+
+### isValidAgentName
+
+```typescript
+function isValidAgentName(name: string): boolean
+```
+
+Checks if a given string is a recognized agent name.
+
+<ParamField path="name" type="string" required>
+  Agent name to validate
+</ParamField>
+
+<ResponseField name="return" type="boolean">
+  `true` if the name exists in VALID_AGENT_NAMES, `false` otherwise
+</ResponseField>
+
+**Example:**
+
+```typescript
+import { isValidAgentName } from "./shared/agent-config.js";
+
+isValidAgentName("Inbox Manager"); // true
+isValidAgentName("Unknown Agent"); // false
+```
+
+### getDefaultDigestType
+
+```typescript
+function getDefaultDigestType(agentName: string): string
+```
+
+Returns the first digest pattern for an agent, used as the default digest type in page titles. If the agent has no patterns or is unknown, returns the agent name itself.
+
+<ParamField path="agentName" type="string" required>
+  Agent name to look up
+</ParamField>
+
+<ResponseField name="return" type="string">
+  First digest pattern for the agent, or the agent name if no patterns exist
+</ResponseField>
+
+**Example:**
+
+```typescript
+import { getDefaultDigestType } from "./shared/agent-config.js";
+
+getDefaultDigestType("Inbox Manager"); // "Email Triage"
+getDefaultDigestType("Docs Librarian"); // "Docs Quick Scan"
+getDefaultDigestType("Unknown Agent"); // "Unknown Agent"
+```
+
+## Usage
+
+These utilities are primarily used internally by the workers:
+
+```typescript
+import {
+  isValidAgentName,
+  getDefaultDigestType,
+  AGENT_TARGET_DB,
+  AGENT_DIGEST_PATTERNS,
+} from "./shared/agent-config.js";
+
+// Validate input
+if (!isValidAgentName(input.agent_name)) {
+  return { success: false, error: "Invalid agent name" };
+}
+
+// Determine target database
+const targetDb = AGENT_TARGET_DB[input.agent_name];
+
+// Build page title
+const digestType = getDefaultDigestType(input.agent_name);
+const title = `${input.agent_emoji} ${digestType} — ${formattedDate}`;
+
+// Search for digest pages
+const patterns = AGENT_DIGEST_PATTERNS[input.agent_name];
+for (const pattern of patterns) {
+  // Query Notion for pages with title containing pattern...
+}
+```
