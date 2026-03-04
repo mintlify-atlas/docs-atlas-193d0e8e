@@ -72,6 +72,7 @@
           {
             "group": "Shared Utilities",
             "pages": [
+              "api/notion-client",
               "api/agent-config",
               "api/status-parser",
               "api/date-utils",

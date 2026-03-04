@@ -1,0 +1,141 @@
+---
+title: "Notion client"
+description: "Shared Notion SDK client and database ID accessors"
+---
+
+The `notion-client` module provides a shared Notion SDK client instance and environment-based database ID accessors. All workers use these functions to ensure consistent credential management.
+
+## getNotionClient
+
+Returns a cached Notion SDK client instance authenticated with `NOTION_TOKEN`.
+
+```typescript
+export function getNotionClient(): Client
+```
+
+### Behavior
+
+- Reads `NOTION_TOKEN` from `process.env`
+- Caches the client instance for reuse across worker invocations
+- Throws if `NOTION_TOKEN` is not set
+
+### Example
+
+```typescript
+import { getNotionClient } from "../shared/notion-client.js";
+
+const notion = getNotionClient();
+const response = await notion.databases.query({
+  database_id: dbId
+});
+```
+
+## getDocsDatabaseId
+
+Returns the Docs database ID from `DOCS_DATABASE_ID` environment variable.
+
+```typescript
+export function getDocsDatabaseId(): string
+```
+
+### Throws
+
+- `Error` if `DOCS_DATABASE_ID` is not set in environment
+
+### Example
+
+```typescript
+import { getDocsDatabaseId } from "../shared/notion-client.js";
+
+const dbId = getDocsDatabaseId();
+// Use dbId with notion.databases.query() or notion.pages.create()
+```
+
+## getHomeDocsDatabaseId
+
+Returns the Home Docs database ID from `HOME_DOCS_DATABASE_ID` environment variable.
+
+```typescript
+export function getHomeDocsDatabaseId(): string
+```
+
+### Throws
+
+- `Error` if `HOME_DOCS_DATABASE_ID` is not set in environment
+
+### Example
+
+```typescript
+import { getHomeDocsDatabaseId } from "../shared/notion-client.js";
+
+const dbId = getHomeDocsDatabaseId();
+// Use for Personal Ops Manager and Home & Life Watcher digests
+```
+
+## getTasksDatabaseId
+
+Returns the Tasks database ID from `TASKS_DATABASE_ID` environment variable.
+
+```typescript
+export function getTasksDatabaseId(): string
+```
+
+### Throws
+
+- `Error` if `TASKS_DATABASE_ID` is not set in environment
+
+### Example
+
+```typescript
+import { getTasksDatabaseId } from "../shared/notion-client.js";
+
+const tasksDbId = getTasksDatabaseId();
+// Use when creating handoff tasks with create_task: true
+```
+
+## Environment Variables
+
+All functions require these environment variables to be set:
+
+| Variable | Purpose | Required By |
+|----------|---------|-------------|
+| `NOTION_TOKEN` | Notion integration token | All workers |
+| `DOCS_DATABASE_ID` | Docs database ID | write-agent-digest, check-upstream-status |
+| `HOME_DOCS_DATABASE_ID` | Home Docs database ID | write-agent-digest, check-upstream-status |
+| `TASKS_DATABASE_ID` | Tasks database ID | create-handoff-marker |
+
+See the [Credentials Guide](/guides/credentials) for setup instructions.
+
+## Implementation Notes
+
+<AccordionGroup>
+  <Accordion title="Client caching">
+    The Notion client is instantiated once and cached in module scope. Subsequent calls to `getNotionClient()` return the same instance, avoiding unnecessary authentication overhead.
+  </Accordion>
+  
+  <Accordion title="Fail-fast validation">
+    All accessor functions throw immediately if the required environment variable is missing. This follows the "fail fast" design principle from the architecture—better to crash early with a clear error than to proceed with invalid state.
+  </Accordion>
+  
+  <Accordion title="Deployment credentials">
+    In production (via `ntn workers deploy`), set these secrets using:
+    
+    ```bash
+    ntn workers secrets set NOTION_TOKEN=...
+    ntn workers secrets set DOCS_DATABASE_ID=...
+    ntn workers secrets set HOME_DOCS_DATABASE_ID=...
+    ntn workers secrets set TASKS_DATABASE_ID=...
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Credentials Setup" icon="key" href="/guides/credentials">
+    Configure environment variables and secrets
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/concepts/architecture">
+    Understand the shared module layer
+  </Card>
+</CardGroup>
