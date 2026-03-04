@@ -1,0 +1,90 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "jre-notion-workers",
+  "projectDescription": "TypeScript SDK for governance-compliant Notion Workers that power an 11-agent automation system.",
+  "theme": "mint",
+  "primaryColor": "#0F172A",
+  "lightColor": "#3B82F6",
+  "darkColor": "#1E40AF",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/agent-system",
+              "concepts/governance"
+            ]
+          },
+          {
+            "group": "Workers",
+            "pages": [
+              "workers/write-agent-digest",
+              "workers/check-upstream-status",
+              "workers/create-handoff-marker"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/setup",
+              "guides/credentials",
+              "guides/testing",
+              "guides/deployment"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Types",
+            "pages": [
+              "api/types",
+              "api/input-output"
+            ]
+          },
+          {
+            "group": "Shared Utilities",
+            "pages": [
+              "api/agent-config",
+              "api/status-parser",
+              "api/date-utils",
+              "api/block-builder"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Three governance-enforcing Notion Workers for agent coordination",
+    "Schema-compliant digest page creation with automatic formatting",
+    "Upstream status checking with staleness detection",
+    "Handoff management with circuit breaker and escalation caps",
+    "TypeScript SDK with strict type safety and comprehensive testing"
+  ],
+  "publicApiSurface": [
+    "write-agent-digest",
+    "check-upstream-status",
+    "create-handoff-marker",
+    "WriteAgentDigestInput",
+    "WriteAgentDigestOutput",
+    "CheckUpstreamStatusInput",
+    "CheckUpstreamStatusOutput",
+    "CreateHandoffMarkerInput",
+    "CreateHandoffMarkerOutput"
+  ]
+}
